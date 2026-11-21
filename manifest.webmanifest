@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "Kese · Borç ve Ödeme Takibi",
+  "short_name": "Kese",
+  "description": "Kredi kartı, KMH ve kredi borçlarınızı, gelir ve giderlerinizi takip edin; hangi borcu ne zaman kapatacağınızı planlayın.",
+  "lang": "tr",
+  "dir": "ltr",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f5f5f7",
+  "theme_color": "#f5f5f7",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Hesaplarım", "short_name": "Hesaplarım", "url": "./?go=borclar", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Gelir & Gider", "short_name": "Gelir/Gider", "url": "./?go=butce", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "durum": "guncel",
+  "oranlar": {
+    "gecerlilik": "2026-11-01",
+    "referans": 3.11,
+    "kart_30bin_alti": {
+      "akdi": 3.25,
+      "gecikme": 3.55
+    },
+    "kart_30_180bin": {
+      "akdi": 3.75,
+      "gecikme": 4.05
+    },
+    "kart_180bin_ustu": {
+      "akdi": 4.25,
+      "gecikme": 4.55
+    },
+    "yabanci_para": {
+      "akdi": 4.25,
+      "gecikme": 4.55
+    },
+    "nakit_kmh": {
+      "akdi": 2.98,
+      "gecikme": 3.28
+    }
+  },
+  "cekildi": "2026-11-19T07:10:47",
+  "hata": null
+}

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; worker-src 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f0f12" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Kredi kartı, KMH ve kredi borçlarınızı takip edin; hangi borcu ne zaman kapatacağınızı planlayın. Veriler yalnızca cihazınızda kalır.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Kese">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <title>Kese · Borç ve Ödeme Takibi</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="ui-pages.css">
+  <link rel="stylesheet" href="ui-forms.css">
+  <link rel="stylesheet" href="ui-panels.css">
+  <link rel="stylesheet" href="ui-fix.css">
+</head>
+<body>
+  <a class="skip" href="#main">İçeriğe geç</a>
+  <header class="topbar mobtop" aria-label="Üst çubuk">
+    <span class="tb-brand"><img class="tb-mascot" src="icons/mascot-96.png" alt="" width="32" height="32" decoding="async"><span class="tb-name">Kese</span></span>
+    <span class="tb-actions mt-actions">
+      <button type="button" id="sim-toggle" class="mt-btn" data-act="sbx-toggle" hidden aria-label="Simülasyon modunu aç veya kapat" title="Simülasyon"><i data-ic="flask"></i></button>
+      <button type="button" id="sync-chip" class="mt-btn" data-act="auth-open" hidden aria-label="Hesap ve eşitleme" title="Hesap ve eşitleme"><i data-ic="upload"></i></button>
+      <button type="button" id="ai-open" class="mt-btn ai-btn" data-act="ai-open" aria-label="Kese Asistan'ı aç" title="Kese Asistan (Yapay Zeka)"><i data-ic="spark"></i><span class="ai-btn-lbl">Asistan</span></button>
+      <button type="button" id="ses-toggle" class="mt-btn on" data-act="ses-toggle" aria-label="Ses efektleri" aria-pressed="true" title="Ses"><i data-ic="vol"></i></button>
+    </span>
+  </header>
+  <div class="app">
+    <main id="main" class="main" tabindex="-1">
+      <div id="simbar" class="simbar" hidden></div>
+      <div id="nudge" class="nudge" role="note" hidden></div>
+      <div id="monthbar" class="monthbar" aria-label="Ay seçimi"></div>
+      <div id="view"></div>
+    </main>
+    <aside id="simpanel" class="simpanel" aria-label="Simülasyon raporu" hidden></aside>
+  </div>
+  <!-- Otomatik gizlenen yüzen menü -->
+  <nav id="dock" class="dock" aria-label="Ana menü">
+    <div id="nav" class="dock-items"></div>
+    <span class="dock-sep" aria-hidden="true"></span>
+    <button type="button" class="dock-add" id="fab-btn" data-act="fab-toggle" aria-label="Ekle" title="Ekle" aria-expanded="false" aria-controls="fab"><i data-ic="plus"></i></button>
+  </nav>
+  <button id="dock-handle" class="dock-handle" type="button" aria-controls="dock" aria-label="Menüyü göster" aria-expanded="false"><span></span></button>
+  <button id="simtab" class="simtab" type="button" data-act="sbx-panel" hidden aria-label="Sağ paneli aç veya kapat"><i data-ic="flask"></i> <span id="simtab-l">Plan</span> <span id="simtab-n" class="badge"></span></button>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Hesap / kart ekle-düzenle -->
+  <dialog id="dlg-hesap" aria-labelledby="hesap-title">
+    <form method="dialog" id="form-hesap" novalidate>
+      <header><h2 id="hesap-title">Hesap ekle</h2><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <input type="hidden" id="he-cat"><input type="hidden" id="he-id">
+        <label>Banka<select id="he-banka"></select></label>
+        <label><span id="he-ad-lbl">Ad</span><input id="he-ad" type="text" maxlength="60"></label>
+        <div class="grid2">
+          <label><span id="he-limit-lbl">Limit (₺)</span><input id="he-limit" type="text" data-fmt="1" inputmode="decimal"><small class="err" id="he-limit-err"></small></label>
+          <label>Aylık faiz (%)<input id="he-faiz" type="text" data-fmt="1" inputmode="decimal"><small id="he-faiz-hint" class="hint"></small></label>
+        </div>
+        <div class="grid2">
+          <label><span id="he-kesim-lbl">Hesap kesim günü</span><input id="he-kesim" type="number" min="1" max="31"><small class="hint" id="he-kesim-hint"></small></label>
+          <label id="he-son-box">Son ödeme günü<input id="he-son" type="number" min="1" max="31"></label>
+        </div>
+        <div class="grid2" id="he-bak-box" hidden>
+          <label>Hesaptaki para (₺)<input id="he-para" type="text" data-fmt="1" inputmode="decimal"><small class="hint">Hesap artıdaysa bakiye.</small></label>
+          <label>Artı paradan kullanılan (₺)<input id="he-eksi" type="text" data-fmt="1" inputmode="decimal"><small class="hint">Hesap eksideyse eksi tutar.</small></label>
+        </div>
+      </div>
+      <footer><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary" id="he-save">Kaydet</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Harcama / kullanım -->
+  <dialog id="dlg-har" aria-labelledby="har-title">
+    <form method="dialog" id="form-har" novalidate>
+      <header><div><h2 id="har-title">Harcama ekle</h2><p class="sub" id="har-sub"></p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <input type="hidden" id="har-cat"><input type="hidden" id="har-id"><input type="hidden" id="har-orig-paid">
+        <fieldset class="fgrp"><legend>İşlem</legend><div class="fg">
+          <label>İşlem türü<select id="har-tur"></select></label>
+          <label>İşlem tarihi<input id="har-tarih" type="date"></label>
+          <label>Açıklama<input id="har-ack" type="text" maxlength="80"></label>
+        </div></fieldset>
+        <fieldset class="fgrp"><legend>Tutar ve taksit</legend><div class="fg">
+          <label>Tutar (₺)<input id="har-tutar" type="text" data-fmt="1" inputmode="decimal"><small class="err" id="har-tutar-err"></small><small class="hint" id="har-kalan"></small></label>
+          <label>Taksit sayısı<input id="har-n" type="number" min="1" max="60"><small class="err" id="har-n-err"></small></label>
+          <label>Aylık taksit (₺)<input id="har-aylik" type="text" data-fmt="1" inputmode="decimal" title="Tutarı bilmiyorsanız taksidi yazın; tutar hesaplanır. Tutarla birlikte yazarsanız bankanın taksiti esas alınır."></label>
+          <label>Aylık faiz (%)<input id="har-faiz" type="text" data-fmt="1" inputmode="decimal"><small class="hint" id="har-faiz-hint"></small></label>
+        </div></fieldset>
+        <fieldset class="fgrp"><legend>Ödeme durumu</legend><div class="fg">
+          <label>Ödenmiş taksit<input id="har-odenen" type="number" min="0" max="60"></label>
+          <label>İlk ödeme ayı<select id="har-ilk"></select></label>
+        </div></fieldset>
+        <div class="live" id="har-live" aria-live="polite"></div>
+      </div>
+      <footer><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary">Kaydet</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Gecikmiş borç -->
+  <dialog id="dlg-gec" aria-labelledby="gec-title">
+    <form method="dialog" id="form-gec" novalidate>
+      <header><div><h2 id="gec-title">Gecikmiş borç ekle</h2><p class="sub" id="gec-sub"></p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <input type="hidden" id="gec-cat"><input type="hidden" id="gec-pid"><input type="hidden" id="gec-id">
+        <p class="hint" style="margin:0">Geçmiş dönemden kalan ve vadesi geçmiş borcu girin. Gecikme faizi vade tarihinden bugüne gün gün hesaplanır.</p>
+        <label>Açıklama<input id="gec-ack" type="text" maxlength="80"></label>
+        <div class="grid2">
+          <label>Kalan borç / asıl tutar (₺)<input id="gec-ana" type="text" data-fmt="1" inputmode="decimal"><small class="err" id="gec-ana-err"></small><small class="hint">Faiz hariç, ekstredeki borç tutarı.</small></label>
+          <label>Gecikmeye düştüğü tarih (son ödeme günü)<input id="gec-tarih" type="date"><small class="err" id="gec-tarih-err"></small></label>
+        </div>
+        <label>Aylık gecikme faizi (%)<input id="gec-faiz" type="text" data-fmt="1" inputmode="decimal"><small class="hint" id="gec-faiz-hint"></small></label>
+        <div class="live" id="gec-live" aria-live="polite"></div>
+      </div>
+      <footer><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary">Kaydet</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Kısmi / tam ödeme -->
+  <dialog id="dlg-kismi" aria-labelledby="kismi-title">
+    <form method="dialog" id="form-kismi" novalidate>
+      <header><div><h2 id="kismi-title">Gecikmiş borca ödeme yap</h2><p class="sub" id="kismi-sub"></p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <input type="hidden" id="kismi-cat"><input type="hidden" id="kismi-pid"><input type="hidden" id="kismi-id"><input type="hidden" id="kismi-no">
+        <div class="live" id="kismi-now"></div>
+        <label>Ödediğiniz tutar (₺)<input id="kismi-tutar" type="text" data-fmt="1" inputmode="decimal"><small class="err" id="kismi-err"></small></label>
+        <button type="button" class="btn sm" id="kismi-full">Tamamını öde</button>
+        <div class="live" id="kismi-live" aria-live="polite"></div>
+        <p class="hint" id="kismi-hint" style="margin:0">Ödeme önce işlemiş faizi kapatır, kalanı ana paradan düşer. Kalan borç için faiz bugünden yeniden işlemeye başlar.</p>
+      </div>
+      <footer><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary">Ödemeyi kaydet</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Sigorta kapsamı -->
+  <dialog id="dlg-sig" aria-labelledby="sig-title">
+    <form method="dialog" id="form-sig" novalidate>
+      <header><div><h2 id="sig-title">Sigorta kapsamı</h2><p class="sub">Sigorta, belirli aylardaki taksitlerinizi sizin yerinize öder</p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <label>Hangi ürünün taksitlerini sigorta ödeyecek?<select id="sig-urun"></select><small class="err" id="sig-urun-err"></small></label>
+        <label>Sigorta adı (isteğe bağlı)<input id="sig-ad" type="text" maxlength="60"></label>
+        <div class="grid2">
+          <label>Şu tarihten sonraki aylarda<input id="sig-tarih" type="date"><small class="hint">Seçtiğiniz tarihten sonraki ay, sigortanın ödediği ilk aydır.</small></label>
+          <label>İlk sigorta ödemeli ay<select id="sig-ilk"></select><small class="hint">Gerekirse elle değiştirin.</small></label>
+        </div>
+        <label>Kaç ay boyunca sigorta ödeyecek<input id="sig-sure" type="number" min="1" max="120" step="1" ><small class="err" id="sig-sure-err"></small></label>
+        <div class="live" id="sig-live" aria-live="polite"></div>
+        <p class="hint" style="margin:0">Bu aylardaki taksitler için sizden ödeme beklenmez: bu ay yükünüze, takvime ve ödeme tahminlerine eklenmez. Sigortaya prim ödemiyorsunuz; prim ödüyorsanız bunu "Gelir ve giderler" ekranına gider olarak ekleyin.</p>
+      </div>
+      <footer><button type="button" class="btn danger" id="sig-remove" hidden>Kapsamı kaldır</button><span style="flex:1"></span><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary">Kaydet</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Asgari ödeme rehberi -->
+  <dialog id="dlg-cal" aria-labelledby="cal-title">
+    <div class="dlgwrap">
+      <header><div><h2 id="cal-title">Ay</h2><p class="sub" id="cal-sub"></p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body" id="cal-body"></div>
+      <footer><button type="button" class="btn ghost" data-close>Kapat</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-acc" class="wide" aria-labelledby="acc-title">
+    <div class="dlgwrap">
+      <header><div><h2 id="acc-title">Ayrıntı</h2></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body" id="acc-body"></div>
+      <footer><button type="button" class="btn ghost" data-close>Kapat</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-inst" aria-labelledby="inst-title">
+    <div class="dlgwrap">
+      <header><div><h2 id="inst-title">Taksit listesi</h2><p class="sub" id="inst-sub"></p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body" id="inst-body"></div>
+      <footer><button type="button" class="btn ghost" data-close>Kapat</button></footer>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-asgari" class="wide" aria-labelledby="asgari-title">
+    <form method="dialog" novalidate>
+      <header><div><h2 id="asgari-title">Asgari ile ne kadar devam edebilirim?</h2><p class="sub">Kart, kredi ve KMH için asgari ödeme kuralları ve hesabınıza göre sonuç</p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body" id="as-body"></div>
+      <footer><button type="button" class="btn ghost" data-close>Kapat</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Giriş / üye ol (isteğe bağlı hesap) -->
+  <dialog id="dlg-auth" aria-labelledby="auth-title">
+    <form method="dialog" id="form-auth" novalidate>
+      <header><div><h2 id="auth-title">Giriş yap</h2><p class="sub">Hesap zorunlu değil; verilerinizi yedeklemek ve cihazlar arası eşitlemek içindir</p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <div class="tabs" role="tablist" style="margin:0"><button type="button" role="tab" data-act="auth-tab" data-m="giris" data-authtab="giris" aria-selected="true">Giriş yap</button><button type="button" role="tab" data-act="auth-tab" data-m="uye" data-authtab="uye" aria-selected="false">Üye ol</button></div>
+        <label>E-posta<input id="au-email" type="email" autocomplete="email" inputmode="email" maxlength="190"></label>
+        <label id="au-pass-box">Şifre<input id="au-pass" type="password" autocomplete="current-password" minlength="10" maxlength="128"><small class="hint">En az 10 karakter.</small></label>
+        <label id="au-consent-box" hidden style="display:flex;gap:8px;align-items:flex-start;font-weight:400"><input id="au-consent" type="checkbox" style="width:auto;margin:3px 0 0"> <span>Verilerimin hesabımda (AB bölgesindeki sunucuda) saklanmasını ve <a href="privacy.html" target="_blank" rel="noopener">gizlilik politikasını</a> kabul ediyorum.</span></label>
+        <small id="au-msg" class="err" role="alert"></small>
+        <button type="button" class="btn" id="au-google" data-act="auth-google">Google ile devam et</button>
+        <button type="button" class="btn sm" id="au-forgot" data-act="auth-tab" data-m="sifre" style="justify-self:start">Şifremi unuttum</button>
+      </div>
+      <footer><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary" id="au-submit">Giriş yap</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Şifre sıfırlama -->
+  <dialog id="dlg-newpass" aria-labelledby="np-title">
+    <form method="dialog" id="form-newpass" novalidate>
+      <header><h2 id="np-title">Yeni şifre belirleyin</h2><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body"><label>Yeni şifre<input id="np-pass" type="password" autocomplete="new-password" minlength="10" maxlength="128"><small class="hint">En az 10 karakter.</small></label><small id="np-msg" class="err" role="alert"></small></div>
+      <footer><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary">Şifreyi güncelle</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Eşitleme çakışması -->
+  <dialog id="dlg-conflict" aria-labelledby="cf-title">
+    <form method="dialog" novalidate>
+      <header><div><h2 id="cf-title">Hangi veriler kalsın?</h2><p class="sub" id="cf-why"></p></div><button type="button" class="x" data-act="cf-later" aria-label="Sonra karar ver"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <div class="live"><b>Bu cihazda:</b> <span id="cf-local"></span></div>
+        <div class="live"><b>Hesabınızda:</b> <span id="cf-cloud"></span></div>
+        <p class="hint" style="margin:0">Hangisini seçerseniz seçin, ezilen taraf yedeklenir: hesabınızda son 10 sürüm, bu cihazda bir önceki kopya saklanır. İsterseniz önce ikisini de indirin.</p>
+        <button type="button" class="btn" data-act="cf-cloud">Hesabımdaki verileri kullan (bu cihazdakini yedekle)</button>
+        <button type="button" class="btn" data-act="cf-local">Bu cihazdakini hesabıma yükle</button>
+        <button type="button" class="btn ghost" data-act="cf-both">İkisini de indir</button>
+      </div>
+      <footer><button type="button" class="btn ghost" data-act="cf-later">Sonra karar vereceğim</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Borç kapat (yalnız simülasyon) -->
+  <dialog id="dlg-kapat" aria-labelledby="kp-title">
+    <form method="dialog" id="form-kapat" novalidate>
+      <header><div><h2 id="kp-title">Borç kapat</h2><p class="sub">Simülasyon: gerçek verileriniz değişmez</p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="body">
+        <p class="hint" style="margin:0">Kapatmak istediğiniz borçları seçin. Kapatma bedeli, kalan taksitlerin o günkü değeridir; bankanın verdiği tutar farklıysa satırdaki tutarı değiştirin. Kapatılan borcun sonraki taksitleri silinir.</p>
+        <div class="grid2">
+          <label>Ne zaman kapatılsın?<select id="kp-ym"></select></label>
+          <label>Kapatma masrafı (%)<input id="kp-masraf" type="text" data-fmt="1"  inputmode="decimal"><small class="hint">Erken kapamada banka masraf alabilir.</small></label>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-weight:400"><input id="kp-birikim" type="checkbox" style="width:auto;margin:0"> Birikim / satış parasıyla öderim (aylık nakit akışıma yansımasın)</label>
+        <div id="kp-list" class="kplist"></div>
+        <div class="live" id="kp-live" aria-live="polite"></div>
+        <small class="err" id="kp-err"></small>
+      </div>
+      <footer><button type="button" class="btn ghost" data-close>Vazgeç</button><button type="submit" class="btn primary">Seçilenleri kapat</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Geri dönüşü olmayan işlemler için uygulama içi onay -->
+  <dialog id="dlg-onay" aria-labelledby="onay-title" role="alertdialog">
+    <form method="dialog" novalidate>
+      <header><div><h2 id="onay-title">Emin misiniz?</h2></div></header>
+      <div class="body"><p id="onay-text" style="margin:0"></p></div>
+      <footer><button type="button" class="btn ghost" id="onay-iptal">Vazgeç</button><button type="button" class="btn danger" id="onay-tamam">Sil</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Adım adım giriş sihirbazı -->
+  <dialog id="dlg-wiz" aria-labelledby="wiz-title">
+    <form method="dialog" id="form-wiz" novalidate>
+      <header><div><h2 id="wiz-title">Borç ekle</h2><p class="sub" id="wiz-step"></p></div><button type="button" class="x" data-close aria-label="Kapat"><i data-ic="x"></i></button></header>
+      <div class="wizprog" aria-hidden="true"><i id="wiz-bar"></i></div>
+      <div class="body" id="wiz-body"></div>
+      <footer><button type="button" class="btn ghost" id="wiz-back">‹ Geri</button><span style="flex:1"></span><button type="button" class="btn ghost" id="wiz-skip" hidden>Bunu atla</button><button type="submit" class="btn primary" id="wiz-next">İleri ›</button></footer>
+    </form>
+  </dialog>
+
+  <!-- Kese Asistan (Yapay Zeka) -->
+  <dialog id="dlg-ai" class="ai-dlg" aria-labelledby="ai-title"></dialog>
+
+  <script src="config.js"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="store.js"></script>
+  <script src="sync.js"></script>
+  <script src="calc.js"></script>
+<script src="import.js"></script>
+  <script src="live.js"></script>
+  <script src="ai.js"></script>
+  <script src="app.js"></script>
+  <script src="dock.js"></script>
+  <script src="kese-pet.js"></script>
+</body>
+</html>
