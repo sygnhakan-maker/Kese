@@ -16,12 +16,12 @@
       "gecikme": 4.55
     },
     "yabanci_para": {
-      "akdi": 4.25,
-      "gecikme": 4.55
-    },
-    "nakit_kmh": {
       "akdi": 2.98,
       "gecikme": 3.28
+    },
+    "nakit_kmh": {
+      "akdi": 4.25,
+      "gecikme": 4.55
     }
   },
   "cekildi": "2026-11-19T07:10:47",

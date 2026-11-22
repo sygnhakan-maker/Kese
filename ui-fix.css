@@ -464,3 +464,15 @@ div.wl-step { cursor: default; grid-template-columns: 44px minmax(0, 1fr); }
 @media (prefers-reduced-motion: reduce) {
   html:not(.motion-ok) .pet .pet-body *, html:not(.motion-ok) .pet .pet-body { animation: none !important; }
 }
+
+.record-actions, .document-entry { margin: 0; }
+.record-actions summary, .document-entry summary { cursor: pointer; color: var(--accent-text); font-weight: 650; }
+.record-actions[open] { flex-basis: 100%; }
+.record-actions > div, .document-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.document-entry { margin-block: 12px; }
+.loan-entry { margin: 12px 0; }
+.wiz-exit { flex: none; min-height: 44px; }
+#dlg-wiz footer[hidden] { display: none; }
+@media (prefers-color-scheme: dark) {
+  .fab-item .fab-ic { color: var(--accent-ink); }
+}

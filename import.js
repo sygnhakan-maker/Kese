@@ -506,16 +506,21 @@
     return (loaded[src] = new Promise((res, rej) => {
       const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Okuma bileşeni yüklenemedi: ' + src));
       document.head.appendChild(s);
-    }));
+    })).catch((error) => { delete loaded[src]; throw error; });
   }
-  const abs = (p) => new URL(p, document.baseURI).href;
+  const CDN = 'https://cdn.jsdelivr.net/npm/';
+  const OCR = CDN + 'tesseract.js@5.1.1/dist/';
+  const PDF = CDN + 'pdfjs-dist@4.10.38/legacy/build/';
+  let pdfModule;
   let worker = null;
   async function getWorker(onStatus) {
     if (worker) return worker;
-    await loadScript('vendor/ocr/tesseract.min.js');
+    await loadScript(OCR + 'tesseract.min.js');
     worker = await self.Tesseract.createWorker('tur', 1, {
-      workerPath: abs('vendor/ocr/worker.min.js'), corePath: abs('vendor/ocr/'), langPath: abs('vendor/ocr/'),
-      gzip: false, workerBlobURL: false, cacheMethod: 'none',
+      workerPath: OCR + 'worker.min.js',
+      corePath: CDN + 'tesseract.js-core@5.1.1/',
+      langPath: CDN + '@tesseract.js-data/tur@1.0.0/4.0.0_best_int/',
+      gzip: true, workerBlobURL: true,
       logger: (m) => { if (m && m.status === 'recognizing text' && onStatus) onStatus(`Yazı okunuyor… %${Math.round((m.progress || 0) * 100)}`); },
     });
     return worker;
@@ -597,9 +602,14 @@
     return out;
   }
   async function pdfText(file, onStatus) {
-    await loadScript('vendor/pdfjs/pdf.min.js');
-    const pdfjs = self.pdfjsLib; pdfjs.GlobalWorkerOptions.workerSrc = abs('vendor/pdfjs/pdf.worker.min.js');
-    const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    if (!pdfModule) pdfModule = import(PDF + 'pdf.min.mjs').catch((error) => { pdfModule = null; throw error; });
+    const pdfjs = await pdfModule;
+    pdfjs.GlobalWorkerOptions.workerSrc = PDF + 'pdf.worker.min.mjs';
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+    try { return await pdfPages(doc, onStatus); }
+    finally { await doc.destroy(); }
+  }
+  async function pdfPages(doc, onStatus) {
     let all = '';
     for (let p = 1; p <= Math.min(doc.numPages, 10); p++) {
       onStatus && onStatus(`PDF okunuyor… sayfa ${p}/${Math.min(doc.numPages, 10)}`);
@@ -656,5 +666,40 @@
     return separateDocuments ? documents : texts.join('\f');
   }
 
-  return { parse, parseAll, readFiles, fold, detectBank, fuzzyBank };
+  function parseReceipt(text) {
+    const passes = String(text || '').split('\f');
+    for (const pass of passes) {
+      const lines = pass.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const priorities = [
+        /\b(?:genel toplam|odenecek tutar|islem tutari|satis tutari|toplam tutar|grand total)\b/,
+        /^(?:[ *]*toplam\b|[ *]*tutar\b)/,
+      ];
+      let tutar = 0;
+      for (const pattern of priorities) {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const l = fold(lines[i]);
+          if (!pattern.test(l) || /kdv|vergi|taksit tutari/.test(l)) continue;
+          const next = lines[i + 1] || '';
+          const values = amountsIn(lines[i]);
+          const below = /^\s*(?:[₺*]|tl\s)*\s*\d[\d.,]*[,.]\d{2}(?:\s*(?:tl|₺))?\s*$/i.test(next) ? amountsIn(next) : [];
+          tutar = values.at(-1) || below.at(-1) || 0;
+          if (tutar > 0) break;
+        }
+        if (tutar > 0) break;
+      }
+      if (!tutar) continue;
+      const tarih = lines.flatMap(datesIn).find((iso) => {
+        const date = new Date(iso + 'T00:00:00Z');
+        return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === iso;
+      });
+      const raw = fold(pass);
+      const n = raw.match(/\btaksit(?: sayisi| adedi)?\s*[:=]\s*(\d{1,2})\b/) || raw.match(/\b(\d{1,2})\s+taksit\b/);
+      const taksit = n && Number(n[1]) > 1 && Number(n[1]) <= 60 ? Number(n[1]) : 1;
+      const merchant = lines.find((line) => /^(?:isyeri adi|uye isyeri adi|merchant name)\s*:/i.test(fold(line)));
+      return { tutar, tarih, taksit, aciklama: merchant ? merchant.split(':').slice(1).join(':').trim().slice(0, 80) : '' };
+    }
+    return {};
+  }
+
+  return { parse, parseAll, parseReceipt, readFiles, fold, detectBank, fuzzyBank };
 }));

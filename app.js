@@ -761,9 +761,6 @@
     };
     const totalCount = counts.KART + counts.KREDI + counts.KMH + counts.ELDEN;
     const head = pageHead('Hesaplarım', 'Kartların, vadesiz hesapların, kredilerin ve elden borçların. Eklemek için alttaki + düğmesini kullan.');
-    if (!totalCount) {
-      return head + `<section class="panel"><div class="empty">Henüz kart, hesap veya kredi eklemedin. Başlamak için alttaki <b>+</b> düğmesine dokun.</div></section>`;
-    }
     const filters = [
       ['ALL', 'Tümü', totalCount],
       ['KART', 'Kart', counts.KART],
@@ -771,7 +768,7 @@
       ['KMH', 'Hesaplar', counts.KMH],
       ['ELDEN', 'Elden', counts.ELDEN],
     ];
-    if (ui.debtFilter !== 'ALL' && !(counts[ui.debtFilter] > 0)) ui.debtFilter = 'ALL';
+    const loanActions = !ui.ym && ui.debtFilter === 'KREDI' ? '<div class="debt-actions loan-entry"><button type="button" class="btn primary" data-act="add-kredi">Kredi ekle</button><button type="button" class="btn" data-act="import-loan">Belgeden kredi ekle</button></div>' : '';
     const filterBar = `<div class="debt-filters" role="tablist" aria-label="Borç filtreleri">${filters.map(([k, l, n]) =>
       `<button type="button" role="tab" class="btn sm${ui.debtFilter === k ? ' primary on' : ''}" data-debt-filter="${k}" aria-selected="${ui.debtFilter === k}">${l} (${n})</button>`).join('')}</div>`;
 
@@ -797,7 +794,9 @@
             ${asgari > 0 ? `<div class="debt-meta">Asgari ödeme: <b class="warn-t">${M(asgari)}</b></div>` : ''}
             <div class="debt-prog">${lim > 0 ? `<div class="meter${pctUsed > 85 ? ' hot' : ''}" aria-label="Limitin %${pctUsed} kullanılıyor"><i style="width:${pctUsed}%"></i></div>` : ''}<span>${lim > 0 ? `Kullanılan ${M(used)} / ${M(lim)} · kullanılabilir <b>${M(Math.max(0, lim - used))}</b>` : `Kullanılan ${M(used)} · limit girilmedi`}</span></div>
             ${sonraki > 0.5 ? `<div class="debt-meta">${icon('cal')} Sonraki ekstrelere taksitler: <b>${M(sonraki)}</b></div>` : ''}
-            <div class="debt-actions">${payAct}<button type="button" class="btn sm" data-act="sel-acc" data-cat="KART" data-id="${a.id}">Detay</button></div>
+            <div class="debt-actions">${payAct}<button type="button" class="btn sm" data-act="sel-acc" data-cat="KART" data-id="${a.id}">Detay</button>${ui.ym ? '' : `<button type="button" class="btn sm" data-act="add-har" data-cat="KART" data-pid="${a.id}">Harcama ekle</button>
+              <button type="button" class="btn sm" data-act="import-account" data-cat="KART" data-id="${a.id}">Belge ekle</button>
+              <details class="record-actions"><summary>Yönet</summary><div><button type="button" class="btn sm" data-act="edit-hesap" data-cat="KART" data-id="${a.id}">Düzenle</button><button type="button" class="btn sm danger" data-act="del-hesap" data-cat="KART" data-id="${a.id}">Sil</button></div></details>`}</div>
           </article>`,
         });
       });
@@ -830,7 +829,9 @@
             <div class="debt-card-amt"><strong>${M(kalan)}</strong><small>${kalan <= 0.01 ? 'Kapandı!' : `${prog.totalCount - prog.paidCount} taksit kaldı`}</small></div>
             <div class="debt-prog"><div class="meter" aria-label="%${prog.pct} ödendi"><i style="width:${prog.pct}%"></i></div><span>%${prog.pct} ödendi (${prog.paidCount}/${prog.totalCount})${bitis ? ` · Bitiş ${bitis}` : ''}</span></div>
             <div class="debt-meta">${nxt ? `${icon('cal')} Sıradaki: <b>${C.fmtDate(nxt.vade)}</b> · ${M(nxt.tutar)}` : `${icon('check')} Tüm taksitler ödendi`}</div>
-            <div class="debt-actions">${payAct}<button type="button" class="btn sm" data-act="toggle-details" data-key="${key}" aria-haspopup="dialog">Detay</button><button type="button" class="btn sm ghost" data-act="edit-kredi" data-iid="${kr.id}">Düzenle</button></div>
+            <div class="debt-actions">${payAct}<button type="button" class="btn sm" data-act="toggle-details" data-key="${key}" aria-haspopup="dialog">Detay</button><button type="button" class="btn sm ghost" data-act="edit-kredi" data-iid="${kr.id}">Düzenle</button>
+              <details class="record-actions"><summary>Yönet</summary><div><button type="button" class="btn sm" data-act="add-sig" data-bcat="KREDI" data-bid="${kr.id}">${kr.sigorta_kapsam ? 'Sigorta kapsamı' : 'Sigorta taksitleri ödüyor'}</button>
+              <button type="button" class="btn sm danger" data-act="del-kredi" data-iid="${kr.id}">Sil</button></div></details></div>
           </article>`,
         });
       });
@@ -853,7 +854,9 @@
             ${lim > 0 ? `<div class="debt-prog"><div class="meter${pctUsed > 85 ? ' hot' : ''}" aria-label="Artı paranın %${pctUsed} kullanılıyor"><i style="width:${pctUsed}%"></i></div><span>Artı para: ${M(kul)} / ${M(lim)} kullanılıyor</span></div>` : ''}
             ${faiz > 0 ? `<div class="debt-meta">${icon('warn')} Eksi bakiyeye tahmini aylık faiz: <b class="bad-t">${M(faiz)}</b> (her ayın ${a.hesap_kesim_gunu || 30}. günü)</div>` : ''}
             ${nxt ? `<div class="debt-meta">${icon('cal')} Taksitli avans: <b>${C.fmtDate(nxt.vade)}</b> · ${M(nxt.tutar)}</div>` : ''}
-            <div class="debt-actions">${payAct}${bak < 0 && !ui.ym ? `<button type="button" class="btn sm primary" data-act="hesap-giris" data-id="${a.id}" data-tutar="${-bak}">Borcu öde</button>` : ''}<button type="button" class="btn sm" data-act="hesap-giris" data-id="${a.id}">${icon('plus')} Para girişi</button><button type="button" class="btn sm" data-act="sel-acc" data-cat="KMH" data-id="${a.id}">Detay</button></div>
+            <div class="debt-actions">${payAct}${bak < 0 && !ui.ym ? `<button type="button" class="btn sm primary" data-act="hesap-giris" data-id="${a.id}" data-tutar="${-bak}">Borcu öde</button>` : ''}<button type="button" class="btn sm" data-act="hesap-giris" data-id="${a.id}">${icon('plus')} Para girişi</button><button type="button" class="btn sm" data-act="sel-acc" data-cat="KMH" data-id="${a.id}">Detay</button>${ui.ym ? '' : `<button type="button" class="btn sm" data-act="add-har" data-cat="KMH" data-pid="${a.id}">Harcama ekle</button>
+              <button type="button" class="btn sm" data-act="import-account" data-cat="KMH" data-id="${a.id}">Belge ekle</button>
+              <details class="record-actions"><summary>Yönet</summary><div><button type="button" class="btn sm" data-act="edit-hesap" data-cat="KMH" data-id="${a.id}">Düzenle</button><button type="button" class="btn sm danger" data-act="del-hesap" data-cat="KMH" data-id="${a.id}">Sil</button></div></details>`}</div>
           </article>`,
         });
       });
@@ -901,7 +904,7 @@
     const grid = cards.length
       ? `<div class="debt-grid">${cards.map((c) => c.html).join('')}</div>`
       : `<section class="panel"><div class="empty">Bu filtrede borç görünmüyor.<br><br><button type="button" class="btn" data-debt-filter="ALL">Tümünü göster</button></div></section>`;
-    return head + filterBar + grid;
+    return head + filterBar + loanActions + grid;
   }
 
   function accountStats(cat, acc) {
@@ -949,7 +952,7 @@
   function hesapKmhHtml(sel) {
     const bak = C.hesapBakiye(sel), lim = Number(sel.limit) || 0, kul = C.hesapKullanilan(sel), faiz = C.hesapAylikFaiz(sel, S());
     const isl = (sel.islemler || []).slice().sort((a, b) => (b.tarih || '').localeCompare(a.tarih || '') || b.id - a.id);
-    const islHtml = isl.length ? `<ul class="list compact">${isl.slice(0, 60).map((x) => `<li><span class="dt">${(x.tarih || '').slice(8)}.${(x.tarih || '').slice(5, 7)}</span><div class="grow"><b>${esc(x.aciklama || (x.yon === 'giris' ? 'Para girişi' : 'Harcama'))}</b><small>${x.yon === 'giris' ? 'Giriş' : 'Çıkış'} · ${C.fmtDate(x.tarih)}</small></div><span class="amt ${x.yon === 'giris' ? 'ok-t' : ''}">${x.yon === 'giris' ? '+' : '−'}${M(x.tutar)}</span>${ui.ym ? '' : `<button type="button" class="btn sm ghost" data-act="del-islem" data-pid="${sel.id}" data-iid="${x.id}" aria-label="İşlemi sil">${icon('x')}</button>`}</li>`).join('')}</ul>`
+    const islHtml = isl.length ? `<ul class="list compact">${isl.slice(0, 60).map((x) => `<li><span class="dt">${(x.tarih || '').slice(8)}.${(x.tarih || '').slice(5, 7)}</span><div class="grow"><b>${esc(x.aciklama || (x.yon === 'giris' ? 'Para girişi' : 'Harcama'))}</b><small>${x.yon === 'giris' ? 'Giriş' : 'Çıkış'} · ${C.fmtDate(x.tarih)}</small></div><span class="amt ${x.yon === 'giris' ? 'ok-t' : ''}">${x.yon === 'giris' ? '+' : '−'}${M(x.tutar)}</span>${ui.ym ? '' : `<button type="button" class="btn sm" data-act="edit-islem" data-pid="${sel.id}" data-iid="${x.id}">Düzenle</button><button type="button" class="btn sm ghost" data-act="del-islem" data-pid="${sel.id}" data-iid="${x.id}" aria-label="İşlemi sil">${icon('x')}</button>`}</li>`).join('')}</ul>`
       : '<div class="empty">Henüz işlem yok. Harcama veya para girişi ekleyince burada görünür.</div>';
     const rows = (sel.hareketler || []).map((h) => harRow('KMH', sel, h)).join('');
     return `<section class="panel"><header><div><h2>${esc(sel.banka)} · ${esc(sel.hesap_adi)}</h2><p>Vadesiz hesap${lim > 0 ? ` · artı para limiti ${M(lim)} · faiz ${pct(sel.faiz_orani)} aylık` : ''}</p></div>
@@ -1012,7 +1015,7 @@
   const labelTds = (html, labels) => { let i = 0; return html.replace(/<td(?=[\s>])/g, () => { const l = labels[i++]; return l ? `<td data-label="${l}"` : '<td'; }); };
   function harRow(cat, parent, h) { return labelTds(harRowRaw(cat, parent, h), HAR_LABELS); }
   function hasLinkedCardPayment(card, itemId) {
-    return (card.ekstre_odemeleri || []).some((payment) => (payment.refs || []).some((ref) => ref.hid === itemId));
+    return (card.ekstre_odemeleri || []).some((payment) => payment.devreden_id === itemId || (payment.refs || []).some((ref) => ref.hid === itemId));
   }
   function harRowRaw(cat, parent, h) {
     const key = `${cat}:${parent.id}:${h.id}`, open = ui.open === key, v = C.vergiFor(S());
@@ -1021,7 +1024,7 @@
     const linked = cat === 'KART' && hasLinkedCardPayment(parent, h.id);
     const earlyBtn = !ui.ym && un && !sbx.on && !linked ? `<button type="button" class="btn sm ghost" data-act="early-close" data-cat="${cat}" data-pid="${parent.id}" data-iid="${h.id}">Erken Kapattım</button> ` : '';
     const btns = `<button type="button" class="btn sm" data-act="toggle-details" data-key="${key}" aria-haspopup="dialog">${h.gecikmis ? 'Ödemeler' : 'Taksitler'}</button> ` + `${h.gecikmis && un ? `<button class="btn sm primary" data-act="kismi" data-cat="${cat}" data-pid="${parent.id}" data-iid="${h.id}">Ödeme kaydet</button> ` : ''}` +
-      (linked ? '' : `${earlyBtn}${h.ekstre_baslangic ? '' : `<button class="btn sm" data-act="edit-har" data-cat="${cat}" data-pid="${parent.id}" data-iid="${h.id}">Düzenle</button> `}` +
+      (linked ? '<small class="hint">Bu kayıt bir ödemeye bağlı. Düzenlemek veya silmek için ilgili ekstre ödemesini aşağıdan geri al.</small>' : `${earlyBtn}<button class="btn sm" data-act="edit-har" data-cat="${cat}" data-pid="${parent.id}" data-iid="${h.id}">Düzenle</button> ` +
       `<button class="btn sm danger" data-act="del-har" data-cat="${cat}" data-pid="${parent.id}" data-iid="${h.id}">Sil</button>`);
     const kapatBtn = sbx.on && un ? `<button class="btn sm" data-act="kapat-ac" data-cat="${cat}" data-pid="${parent.id}" data-iid="${h.id}" title="Simülasyon: bu borcu kapat">${icon('lock')} Kapat</button> ` : '';
     if (h.gecikmis) {
@@ -1466,7 +1469,7 @@
       <details class="adv-settings">
         <summary>Gelişmiş banka ve faiz ayarları</summary>
         <div class="adv-settings-body">
-          <section class="panel"><header><div><h2>Güncel faiz oranları (TCMB)</h2><p>Günde bir kez otomatik yenilenir.</p></div>
+          <section class="panel"><header><div><h2>Güncel faiz oranları (TCMB)</h2><p>Kayıtlı TCMB azami oranları ve kredi tahminleri burada görünür.</p></div>
             <button type="button" class="btn sm" data-act="refresh-rates">Şimdi güncelle</button></header>
             <div class="pad"><div id="rate-chip" class="rate-chip" role="status"></div></div>
             ${rates && rates.hata ? `<div class="note warn-t">Güncelleme hatası: ${esc(rates.hata)}${rates.durum === 'eski' ? ' (son bilinen değerler gösteriliyor)' : ''}</div>` : ''}
@@ -2148,14 +2151,14 @@
     const clear = () => { f.removeAttribute('aria-invalid'); f.removeEventListener('input', clear); f.removeEventListener('change', clear); };
     f.addEventListener('input', clear); f.addEventListener('change', clear);
   }
-  function openWiz(def) { wiz.def = def; wiz.i = def.start || 0; wiz.d = def.init(); wiz.fromChooser = wizFromChooser; wizFromChooser = false; renderWiz(); $('dlg-wiz').showModal(); wizFocus(); }
+  function openWiz(def) { wiz.def = def; wiz.i = def.start || 0; wiz.d = def.init(); wiz.fromChooser = wizFromChooser; wizFromChooser = false; renderWiz(); $('dlg-wiz').showModal(); if (!matchMedia('(pointer: coarse)').matches) wizFocus(); }
   function renderWiz() {
     const steps = wizSteps(), st = steps[wiz.i], last = wiz.i === steps.length - 1;
     $('wiz-title').textContent = wiz.def.baslik;
     $('wiz-step').textContent = steps.length > 1 ? `Adım ${wiz.i + 1} / ${steps.length}` : '';
     $('wiz-bar').style.width = `${(wiz.i + 1) / steps.length * 100}%`; $('wiz-bar').parentElement.hidden = steps.length === 1;
     wizBody().innerHTML = `<div class="wizq"><h3>${typeof st.soru === 'function' ? st.soru(wiz.d) : st.soru}</h3>${(typeof st.ipucu === 'function' ? st.ipucu(wiz.d) : st.ipucu) ? `<p class="hint">${typeof st.ipucu === 'function' ? st.ipucu(wiz.d) : st.ipucu}</p>` : ''}${wiz.d.impNote && wiz.d.impStep === wiz.i ? `<div class="live impnote">${wiz.d.impNote}</div>` : ''}${st.liveTop ? '<div class="live top" id="wz-live-top"></div>' : ''}${st.html(wiz.d)}<div class="live" id="wz-live" ${st.live ? '' : 'hidden'} aria-live="polite"></div><small class="err" id="wiz-err" role="alert"></small></div>`;
-    $('wiz-back').disabled = wiz.i === 0 && !wiz.fromChooser; $('wiz-back').hidden = steps.length === 1 && !wiz.fromChooser; $('wiz-next').hidden = !!st.noNext; document.querySelector('#form-wiz footer').hidden = !!st.hideFooter; $('wiz-next').textContent = last ? (wiz.def.saveLabel || 'Kaydet') : 'İleri ›';
+    $('wiz-back').textContent = wiz.i > 0 || wiz.fromChooser ? '‹ Geri' : 'Vazgeç'; $('wiz-next').hidden = !!st.noNext; document.querySelector('#form-wiz footer').hidden = !!st.hideFooter; $('wiz-next').textContent = last ? (wiz.def.saveLabel || 'Kaydet') : 'İleri ›';
     const skipBtn = $('wiz-skip');
     if (skipBtn) skipBtn.hidden = !(wiz.def && typeof wiz.def.onSkip === 'function');
     if (st.live || st.liveTop || st.auto) wizLive();
@@ -2185,7 +2188,7 @@
     if (wiz.i === steps.length - 1) { $('dlg-wiz').close(); wiz.def.save(wiz.d); return; }
     wiz.i++; renderWiz();
   }
-  function wizBack() { const st = wizSteps()[wiz.i]; if (st.read) st.read(wiz.d, wizBody()); if (wiz.i > 0) { wiz.i--; renderWiz(); } else if (wiz.fromChooser) { $('dlg-wiz').close(); openAddDebt(); } }
+  function wizBack() { const st = wizSteps()[wiz.i]; if (st.read) st.read(wiz.d, wizBody()); if (wiz.i > 0) { wiz.i--; renderWiz(); } else { $('dlg-wiz').close(); if (wiz.fromChooser) openAddDebt(); } }
   const wzVal = (b, id) => { const el = b.querySelector('#' + id); return el ? el.value : ''; };
   const wzRadio = (b, name) => { const el = b.querySelector(`input[name="${name}"]:checked`); return el ? el.value : ''; };
   const choiceHtml = (name, list, cur) => `<div class="choices">${list.map(([v, t, sub]) => `<label class="choice"><input type="radio" name="${name}" value="${esc(v)}" ${v === cur ? 'checked' : ''}><span><b>${esc(t)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span></label>`).join('')}</div>`;
@@ -2220,7 +2223,16 @@
     init: (d) => ({ faiz: !d.faizManual }), defaults: (d) => ({ faiz: krediDefaultFaiz(d.tur || 'İhtiyaç Kredisi') }), vergi: (d) => C.vergiFor(S(), d.tur || 'İhtiyaç Kredisi') };
 
   // ----- Dosyadan (ekran görüntüsü / PDF) doldurma -----
-  const importPicker = (classes) => `<button type="button" class="btn ${classes}" data-act="choose-debt-file">Dosya seç</button><input id="wz-file" type="file" accept="image/*,application/pdf,.pdf" multiple hidden>`;
+  const importPicker = (classes = '') => `<div class="document-actions">
+    <button type="button" class="btn ${classes}" data-act="choose-debt-file" data-input="wz-photo">Fotoğraf</button>
+    <button type="button" class="btn ${classes}" data-act="choose-debt-file" data-input="wz-camera">Kamera</button>
+    <button type="button" class="btn ${classes}" data-act="choose-debt-file">Dosya / PDF</button>
+    <input id="wz-photo" type="file" accept="image/*" hidden>
+    <input id="wz-camera" type="file" accept="image/*" capture="environment" hidden>
+    <input id="wz-file" type="file" accept="image/*,application/pdf,.pdf" hidden>
+  </div>`;
+  const documentFields = (label, open) => `<details class="document-entry"${open ? ' open' : ''}><summary>${label}</summary>
+    ${importPicker()}<p class="hint" id="wz-imp-status" aria-live="polite"></p></details>`;
   const trNum = (v) => String(v).replace('.', ',');
   function normalizeAiItem(raw) {
     if (!raw || typeof raw !== 'object') return null;
@@ -2264,6 +2276,8 @@
   let readingDebtFile = false;
   async function wzImport(files) {
     const def = wiz.def;
+    const draft = wiz.d;
+    const current = () => wiz.def === def && wiz.d === draft && $('dlg-wiz').open;
     const say = (m, err) => { const el = $('wz-imp-status'); if (el) { el.textContent = m; el.style.color = err ? 'var(--bad)' : ''; } };
     if (!def || !def.importer || !files.length) return;
     const hasAi = !!(window.KeseAI && typeof window.KeseAI.parseFile === 'function');
@@ -2275,15 +2289,15 @@
     if (pick) pick.disabled = true;
     try {
       // 1) Önce Gemini Vision (KeseAI.parseFile) dene; kapalı/çevrimdışı/kota/boş sonuçta sessizce yerel OCR'a düş.
-      if (hasAi && files.every(isImgOrPdf) && navigator.onLine !== false) {
+      if (!def.localDocument && hasAi && files.every(isImgOrPdf) && navigator.onLine !== false) {
         try {
           const aiRawItems = [];
           let aiFailed = false;
           for (let i = 0; i < files.length; i++) {
-            if (wiz.def !== def || !$('dlg-wiz').open) return;
+            if (!current()) return;
             say(files.length > 1 ? `✨ Kese Asistan görseli inceliyor... (${i + 1}/${files.length})` : '✨ Kese Asistan görseli inceliyor...');
             const aiRes = await window.KeseAI.parseFile(files[i]);
-            if (wiz.def !== def || !$('dlg-wiz').open) return;
+            if (!current()) return;
             if (!aiRes || aiRes.ok === false) { aiFailed = true; break; }
             const found = Array.isArray(aiRes) ? aiRes : (Array.isArray(aiRes.items) ? aiRes.items : []);
             if (found.length) aiRawItems.push(...found);
@@ -2321,14 +2335,15 @@
       if (!window.KeseImport) { say('Okuma bileşeni yüklenemedi.', true); return; }
       say('Dosya okunuyor…');
       let text;
-      try { text = await KeseImport.readFiles(files, (m) => { if (wiz.def === def) say(m); }, { separateDocuments: def.multi }); }
-      catch (e) { if (wiz.def === def) say(e && e.message ? e.message : 'Dosya okunamadı.', true); return; }
-      if (wiz.def !== def || !$('dlg-wiz').open) return;
-      const r = def.multi ? KeseImport.parseAll(text, { now: new Date(), bankalar: BANKALAR }) : KeseImport.parse(text, { now: new Date(), bankalar: BANKALAR });
+      try { text = await KeseImport.readFiles(files, (m) => { if (current()) say(m); }, { separateDocuments: def.multi }); }
+      catch (e) { if (current()) say(e && e.message ? e.message : 'Dosya okunamadı.', true); return; }
+      if (!current()) return;
+      const r = def.receipt ? KeseImport.parseReceipt(text) : def.multi ? KeseImport.parseAll(text, { now: new Date(), bankalar: BANKALAR }) : KeseImport.parse(text, { now: new Date(), bankalar: BANKALAR });
       const res = def.importer(wiz.d, r);
       if (!res.ok) { say(res.msg, true); return; }
       if (res.done) { $('dlg-wiz').close(); res.done(); return; }
-      if (!def.multi) wiz.d.impNote = impNoteHtml(r);
+      if (!def.multi && !def.receipt) wiz.d.impNote = impNoteHtml(r);
+      else if (def.receipt) wiz.d.impNote = 'Belge okundu. Kaydetmeden önce tutarı, tarihi ve taksitleri kontrol et.';
       else delete wiz.d.impNote;
       wiz.d.impStep = res.goto; wiz.i = res.goto; renderWiz();
     } finally {
@@ -2338,7 +2353,7 @@
   }
   document.addEventListener('change', (ev) => {
     const t = ev.target;
-    if (t && t.id === 'wz-file') { const files = Array.from(t.files || []); t.value = ''; wzImport(files); }
+    if (t && ['wz-file', 'wz-photo', 'wz-camera'].includes(t.id)) { const step = wizSteps()[wiz.i]; if (step?.read) step.read(wiz.d, wizBody()); const files = Array.from(t.files || []); t.value = ''; wzImport(files); }
   });
 
   // ----- Borç ekle: 4 anlaşılır kart -----
@@ -2353,7 +2368,7 @@
           <button type="button" class="bigchoice wiz-card" data-wzgo="kart"><b>${icon('card')} Kredi kartı ekle</b><small>Limit, hesap kesim ve son ödeme günü</small></button>
           <button type="button" class="bigchoice wiz-card" data-wzgo="hesapv"><b>${icon('wallet')} Hesap ekle</b><small>Vadesiz hesap; varsa artı para (KMH) limitiyle</small></button>
           <button type="button" class="bigchoice wiz-card" data-wzgo="kalan"><b>${icon('bank')} Banka kredisi / kredili ürün ekle</b><small>Bankanın ayrı ödeme planı verdiği ihtiyaç, taşıt veya konut kredisi</small></button>
-          <p class="addmenu-more">Diğer: <button type="button" class="linkbtn" data-wzgo="elden">Elden borç</button> · <button type="button" class="linkbtn" data-wzgo="gecikmis">Vadesi geçmiş kart borcu</button> · <button type="button" class="linkbtn" data-wzgo="dosya">Ekran görüntüsünden ekle</button></p>
+          <p class="addmenu-more"><button type="button" class="linkbtn" data-wzgo="elden">Elden borç ekle</button></p>
         </div>` }],
       save: () => {},
     });
@@ -2409,11 +2424,13 @@
       },
     });
   }
-  function openOpeningStatement(id) {
+  function openOpeningStatement(id, editId) {
     const k = db.kredi_kartlari.find((x) => x.id === id);
-    if (!k || k.hareketler.length) return;
+    const existing = editId && k?.hareketler.find((h) => h.id === editId && h.ekstre_baslangic);
+    if (!k || (editId ? !existing : k.hareketler.length)) return;
     openWiz({
-      baslik: 'Mevcut ekstre borcumu gir', init: () => ({ tutar: '', asgari: '', kesim: '', son: '' }),
+      baslik: existing ? 'Ekstre borcunu düzenle' : 'Mevcut ekstre borcumu gir',
+      init: () => existing ? { tutar: trNum(existing.ana_para), asgari: trNum(existing.ekstre_asgari || 0), kesim: existing.tarih, son: existing.taksitler[0]?.vade_tarihi || '' } : { tutar: '', asgari: '', kesim: '', son: '' },
       steps: [{ soru: esc(k.kart_adi), ipucu: 'Bankanın son ekstresindeki tarihleri ve bugün kalan ödeme tutarlarını gir. Bu ekstredeki alışverişler tek borç olarak kaydedilecek.',
         html: (d) => fgrp('Banka ekstresi',
           fld('Kalan ekstre borcu (₺) *', moneyIn('wz-tutar', d.tutar))
@@ -2427,9 +2444,11 @@
       save: (d) => {
         const snap = JSON.stringify(db), tutar = C.r2(posNum(d.tutar)), ym = d.son.slice(0, 7);
         const taksitler = [{ no: 1, ym, vade_tarihi: d.son, tutar, odendi: false }];
-        k.hareketler.push({ id: nextId(k.hareketler, 1000), tur: 'Mevcut Ekstre', aciklama: 'Bankadan girilen ekstre borcu',
+        const record = { id: existing?.id || nextId(k.hareketler, 1000), tur: 'Mevcut Ekstre', aciklama: 'Bankadan girilen ekstre borcu',
           ekstre_baslangic: true, ekstre_asgari: C.r2(posNum(d.asgari)), tarih: d.kesim, ilk_taksit_ym: ym,
-          ana_para: tutar, faiz_orani: 0, toplam_geri_odeme: tutar, toplam_taksit: 1, taksitler });
+          ana_para: tutar, faiz_orani: 0, toplam_geri_odeme: tutar, toplam_taksit: 1, taksitler };
+        if (existing) Object.assign(existing, record);
+        else k.hareketler.push(record);
         save('Mevcut ekstre borcun kaydedildi.', snap);
       },
     });
@@ -2485,12 +2504,12 @@
       return { src, tutar, tarih, kmh: true, yeni, asim: tutar > bos + 0.005, eksiye: yeni < 0 };
     }
     if (src.cat === 'KMH') {      // artı paradan taksitli nakit avans (taksitli KMH)
-      const a = src.acc, v = C.vergiFor(S()), n = Math.min(60, Math.max(1, parseInt(d.n) || 0)), gun = a.hesap_kesim_gunu || 30;
-      const faiz = String(d.faiz ?? '').trim() !== '' ? num(d.faiz) : (Number(a.faiz_orani) || defaultAccountFaiz('KMH'));
+      const a = src.acc, v = C.vergiFor(S()), n = Math.min(60, Math.max(1, parseInt(d.n) || 0)), gun = Number(d.sonraki?.slice(8)) || a.hesap_kesim_gunu || 30;
+      const faiz = spendRate(d, src);
       let ana, toplam;
       if (d.bil === 'taksit') { const x = posNum(d.aylik); toplam = C.r2(x * n); ana = C.r2(C.annuityPrincipal(x, faiz, n, v)); }
       else { ana = posNum(d.tutar); toplam = C.annuityTotal(ana, faiz, n, v); }
-      const devam = d.mod === 'devam', odenen = devam ? Math.min(n - 1, Math.max(0, parseInt(d.odenen) || 0)) : 0;
+      const devam = d.mod === 'devam', odenen = Math.min(n - 1, Math.max(0, parseInt(d.odenen) || 0));
       const ilkYm = devam ? C.ymAdd((d.sonraki || nextDueIso(gun)).slice(0, 7), -odenen) : C.ymAdd(tarih.slice(0, 7), 1);
       const taksitler = C.buildSchedule({ toplam, n, ilkYm, gun, odenenSayisi: odenen });
       const kalanBorc = C.r2(C.sum(taksitler.filter((t) => !t.odendi), (t) => t.tutar));
@@ -2501,23 +2520,30 @@
     }
     const k = src.acc, tek = d.tur === 'tek', v = C.vergiFor(S());
     const n = tek ? 1 : Math.min(60, Math.max(1, parseInt(d.n) || 0));
-    const faizDef = d.tur === 'avans' ? (Number(k.faiz_orani) || defaultAccountFaiz('KMH')) : 0;
-    const faiz = tek ? 0 : (String(d.faiz ?? '').trim() !== '' ? num(d.faiz) : faizDef);
+    const faiz = spendRate(d, src);
     let ana, toplam;
     if (!tek && d.bil === 'taksit') { const a = posNum(d.aylik); toplam = C.r2(a * n); ana = C.r2(C.annuityPrincipal(a, faiz, n, v)); }
     else { ana = posNum(d.tutar); toplam = tek ? ana : C.annuityTotal(ana, faiz, n, v); }
-    const devam = !tek && d.mod === 'devam', odenen = devam ? Math.min(n - 1, Math.max(0, parseInt(d.odenen) || 0)) : 0;
-    let ilkYm, ex = null, gun = k.son_odeme_gunu || 25;
+    const devam = !tek && d.mod === 'devam', odenen = !tek ? Math.min(n - 1, Math.max(0, parseInt(d.odenen) || 0)) : 0;
+    let ilkYm, ex = null, gun = devam && Number(d.sonraki?.slice(8)) || k.son_odeme_gunu || 25;
     if (devam) { const sn = d.sonraki || nextDueIso(gun); ilkYm = C.ymAdd(sn.slice(0, 7), -odenen); }
     else { ex = C.cardStatementOf(tarih, k.kesim_gunu || 15, gun); ilkYm = ex.odemeYm; }
     const taksitler = C.buildSchedule({ toplam, n, ilkYm, gun, odenenSayisi: odenen });
-    const gecmis = devam ? 0 : taksitler.filter((t) => t.vade_tarihi < today).length;
+    const gecmis = devam ? 0 : taksitler.filter((t) => !t.odendi && t.vade_tarihi < today).length;
     if (!devam && d.gecmisOdendi !== false) taksitler.forEach((t) => { if (t.vade_tarihi < today) t.odendi = true; });
     const kalanBorc = C.r2(C.sum(taksitler.filter((t) => !t.odendi), (t) => t.tutar));
     const kullanilabilir = k.limit > 0 ? C.r2(k.limit - C.cardUsed(k)) : null;
     const sonraki = taksitler.find((t) => !t.odendi);
     return { src, tutar: ana, ana, tarih, kmh: false, n, faiz, toplam, aylik: C.r2(toplam / n), ex, ilkYm, taksitler, gecmis, odenen, devam, kalanBorc, sonraki,
       kullanilabilir, asim: kullanilabilir != null && kalanBorc > kullanilabilir + 0.005 };
+  }
+  function spendRate(d, src) {
+    if (d.tur === 'tek') return 0;
+    if (String(d.faiz ?? '').trim() !== '') return num(d.faiz);
+    if (d.tur === 'avans') return R()?.nakit_kmh?.akdi ?? 4.25;
+    const balance = Math.max(C.cardUsed(src.acc), posNum(d.tutar), posNum(d.aylik) * (Number(d.n) || 0));
+    return balance < 30000 ? R()?.kart_30bin_alti?.akdi ?? 3.25
+      : balance <= 180000 ? R()?.kart_30_180bin?.akdi ?? 3.75 : R()?.kart_180bin_ustu?.akdi ?? 4.25;
   }
   function openSpend(pre) {
     const srcs = spendSources();
@@ -2527,7 +2553,6 @@
     const kmhLim = (d) => { const s0 = isK(d) && spendSources().find((x) => x.key === d.src); return !!(s0 && Number(s0.acc.limit) > 0); };
     const srcOf = (d) => spendSources().find((x) => x.key === d.src);
     const kartInfo = (d) => { const s = srcOf(d); return `<div class="fld-info wide"><span>${isK(d) ? 'Hesap' : 'Kart'}</span><b>${esc(s ? s.ad : '')}</b></div>`; };
-    const dueOpts = (d) => { const s = srcOf(d), gun = (s && (isK(d) ? s.acc.hesap_kesim_gunu || 30 : s.acc.son_odeme_gunu)) || 25, first = nextDueIso(gun); return [0, 1, 2, 3].map((i) => C.dueDate(C.ymAdd(first.slice(0, 7), i), gun)); };
     const summary = (d) => {
       const p = spendPlan(d); if (!p) return '';
       if (p.kmh) return `<table class="wizsum compact"><tbody><tr><td>Tutar</td><td>${M(p.tutar)}</td></tr><tr><td>Tarih</td><td>${C.fmtDate(p.tarih)}</td></tr><tr><td>Bakiye</td><td>${C.hesapBakiye(p.src.acc) < 0 ? '−' : ''}${M(Math.abs(C.hesapBakiye(p.src.acc)))} → <b class="${p.yeni < 0 ? 'bad-t' : ''}">${p.yeni < 0 ? '−' : ''}${M(Math.abs(p.yeni))}</b></td></tr></tbody></table>`
@@ -2536,7 +2561,10 @@
         [d.tur === 'avans' ? 'Çekilen tutar' : 'Harcama tutarı', M(p.ana) + (tak(d) && d.bil === 'taksit' ? ' <span class="calc-tag">hesaplandı</span>' : '')],
         tak(d) ? ['Taksit', `${p.n} × ${M(p.aylik)}` + (d.bil !== 'taksit' ? ' <span class="calc-tag">hesaplandı</span>' : '')] : null,
         tak(d) ? ['Toplam geri ödeme', M(p.toplam)] : null,
-        tak(d) ? (faizTop > 0.5 ? ['Faiz ve vergi', `<span class="bad-t">${M(faizTop)}</span>`] : ['Faiz', 'Faizsiz']) : null,
+        tak(d) ? ['Aylık faiz', pct(p.faiz) + (d.faiz === '' ? ' · TCMB azami oranıyla tahmin' : '')] : null,
+        tak(d) ? ['Toplam faiz ve vergi', M(faizTop)] : null,
+        tak(d) ? ['Kalan ana para', M(C.r2(C.annuityPrincipal(p.aylik, p.faiz, p.taksitler.filter((t) => !t.odendi).length, C.vergiFor(S()))))] : null,
+        tak(d) ? ['Kalan faiz ve vergi', M(Math.max(0, C.r2(p.kalanBorc - C.annuityPrincipal(p.aylik, p.faiz, p.taksitler.filter((t) => !t.odendi).length, C.vergiFor(S())))))] : null,
         p.devam ? ['Ödenen / kalan', `${p.odenen} / ${p.n - p.odenen} taksit`] : p.kmhAvans ? ['İlk taksit', C.fmtDate(p.ex.sonOdemeIso)] : ['Ekstre', `${C.fmtDate(p.ex.kesimIso)} kesimi → ödeme ${C.fmtDate(p.ex.sonOdemeIso)}`],
         p.sonraki && tak(d) ? ['Sıradaki taksit', C.fmtDate(p.sonraki.vade_tarihi)] : null,
         tak(d) ? ['Son taksit', C.fmtYM(C.ymAdd(p.ilkYm, p.n - 1))] : null,
@@ -2548,72 +2576,59 @@
     };
     openWiz({
       baslik: 'Harcama ekle', saveLabel: 'Kaydet',
-      init: () => ({ src: pick, srcFixed: !!(pre && pre.cat), tur: 'tek', mod: 'yeni', bil: 'tutar', n: '', tutar: pre?.demo ? '1.000' : '', aylik: '', tarih: C.isoOf(now()), ack: pre?.demo ? 'Örnek alışveriş' : '', faiz: '', odenen: '', sonraki: '', gecmisOdendi: false }),
-      steps: [
-        { soru: 'Hangi kart veya hesaptan?', skip: (d) => d.srcFixed || srcs.length === 1,
-          html: (d) => choiceHtml('wz-src', spendSources().map((x) => [x.key, x.ad, x.sub]), d.src) + `<p class="hint" style="margin-top:8px">Listede yok mu? <button type="button" class="linkbtn" data-wzgo="hesap">Kart / hesap ekle</button></p>`,
-          read: (d, b) => { const v = wzRadio(b, 'wz-src'); if (v && v !== d.src) { d.src = v; d.tur = 'tek'; } } },
-        { soru: 'Harcamanın türü', skip: (d) => isK(d) && !kmhLim(d),
-          html: (d) => kartInfo(d) + choiceHtml('wz-stur', isK(d) ? [['tek', 'Hesaptan harcama', 'Tutar bakiyeden düşer; yetmezse artı paradan kullanılır'], ['avans', 'Taksitli nakit avans (artı paradan)', 'Artı para limitinden taksitle kullandığın tutar']] : SPEND_TUR, d.tur),
-          read: (d, b) => { const v = wzRadio(b, 'wz-stur'); if (v) d.tur = v; } },
-        { soru: 'Yeni mi, devam eden mi?', skip: (d) => !tak(d),
-          html: (d) => choiceHtml('wz-mod', [['yeni', 'Yeni harcama', 'Bugün ya da yakın bir tarihte yaptım; ilk taksit henüz ödenmedi'], ['devam', 'Taksitleri devam ediyor', 'Daha önce başladı, bazı taksitlerini ödedim']], d.mod),
-          read: (d, b) => { const v = wzRadio(b, 'wz-mod'); if (v) d.mod = v; } },
-        { soru: 'Hangi bilgiyle gireceksin?', skip: (d) => !tak(d),
-          html: (d) => choiceHtml('wz-bil', [['tutar', d.tur === 'avans' ? 'Çektiğim tutarla' : 'Harcama tutarıyla', 'Toplam tutarı yazarsın, aylık taksiti ben hesaplarım'], ['taksit', 'Aylık taksit tutarıyla', 'Ekstrede gördüğün taksiti yazarsın, toplamı ben hesaplarım']], d.bil),
-          read: (d, b) => { const v = wzRadio(b, 'wz-bil'); if (v) d.bil = v; } },
-        { soru: (d) => (!tak(d) ? 'Tutar ve tarih' : d.bil === 'taksit' ? 'Aylık taksit tutarı' : (d.tur === 'avans' ? 'Çektiğin tutar' : 'Harcama tutarı')),
-          html: (d) => kartInfo(d) + (!tak(d)
-            ? fgrp('Harcama', fld('Tutar (₺) *', moneyIn('wz-tutar', d.tutar)) + fld('Harcama tarihi *', `<input id="wz-tarih" type="date" value="${esc(d.tarih)}">`) + fld('Açıklama', `<input id="wz-ack" type="text" maxlength="80" value="${esc(d.ack)}" placeholder="Örn: Market">`))
-            : fgrp(d.bil === 'taksit' ? 'Taksit' : 'Tutar', (d.bil === 'taksit' ? fld('Aylık taksit tutarı (₺) *', moneyIn('wz-aylik', d.aylik)) : fld(`${d.tur === 'avans' ? 'Çekilen tutar' : 'Harcama tutarı'} (₺) *`, moneyIn('wz-tutar', d.tutar)))
-              + fld('Açıklama', `<input id="wz-ack" type="text" maxlength="80" value="${esc(d.ack)}" placeholder="Örn: Telefon">`))),
-          read: (d, b) => { ['tutar', 'aylik', 'tarih', 'ack'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); }); },
-          live: (d) => {
-            if (tak(d)) return '';
-            const p = spendPlan(d); if (!p || !(p.tutar > 0) || !d.tarih) return '';
-            if (p.kmh) return summary(d);
-            return `Bu harcamanın ödemesi <b>${C.fmtDate(p.ex.sonOdemeIso)}</b> · <b>${M(p.tutar)}</b>.`;
-          },
-          validate: (d) => {
-            const p = spendPlan(d);
-            if (tak(d)) return d.bil === 'taksit' ? (posNum(d.aylik) > 0 ? '' : 'Aylık taksit tutarını yazın.') : (posNum(d.tutar) > 0 ? '' : 'Tutarı yazın.');
-            if (!(posNum(d.tutar) > 0)) return 'Tutarı yazın.';
-            if (!d.tarih) return 'Harcama tarihini seçin.';
-            if (p && p.kmh && d.tarih > C.isoOf(now())) return 'Hesap harcaması için bugünün veya geçmiş bir tarih seçin.';
-            if (openingStatementConflict(p)) return openingStatementConflict(p);
-            if (p && p.asim) return p.kmh ? 'Hesapta yeterli para veya artı para limiti yok.' : 'Bu harcama kartın kullanılabilir limitini aşıyor.';
-            return '';
-          } },
-        { soru: 'Kaç taksit?', skip: (d) => !tak(d),
-          html: (d) => { const s = srcOf(d), faizDef = d.tur === 'avans' ? trNum((s && Number(s.acc.faiz_orani)) || defaultAccountFaiz('KMH')) : '0';
-            return fgrp('Taksit', fld('Toplam taksit sayısı *', `<input id="wz-n" type="number" min="2" max="60" step="1" inputmode="numeric" value="${esc(d.n)}" placeholder="Örn: 6">`)
-              + `<div class="chipsrow wide">${[2, 3, 4, 6, 9, 12].map((n) => `<button type="button" class="btn sm" data-wzset="wz-n:${n}">${n}</button>`).join('')}</div>`
-              + fld('Aylık faiz (%)', `<input id="wz-faiz" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.faiz)}" placeholder="${faizDef}"><small class="hint">${d.tur === 'avans' ? 'Boşsa kartın faizi. Faize %15 BSMV + %15 KKDF eklenir.' : 'Faizsiz taksitte boş bırak.'}</small>`)); },
-          read: (d, b) => { d.n = wzVal(b, 'wz-n'); d.faiz = wzVal(b, 'wz-faiz'); },
-          live: (d) => { const p = spendPlan(d); if (!p || !(parseInt(d.n) >= 2) || !(p.toplam > 0)) return ''; const f = C.r2(p.toplam - p.ana);
-            return d.bil === 'taksit' ? `${d.tur === 'avans' ? 'Çekilen tutar' : 'Harcama tutarı'}: <b>${M(p.ana)}</b> · toplam geri ödeme <b>${M(p.toplam)}</b>${f > 0.5 ? ` · faiz ve vergi <span class="bad-t">${M(f)}</span>` : ''}`
-              : `Aylık taksit: <b>${p.n} × ${M(p.aylik)}</b> · toplam geri ödeme <b>${M(p.toplam)}</b>${f > 0.5 ? ` · faiz ve vergi <span class="bad-t">${M(f)}</span>` : ''}`; },
-          validate: (d) => { const n = parseInt(d.n); if (!(n >= 2 && n <= 60)) return 'Toplam taksit sayısını yazın (2-60).'; if (String(d.faiz).trim() !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 15)) return 'Aylık faiz 0 ile 15 arasında olmalı.'; return ''; } },
-        { soru: (d) => (d.mod === 'devam' ? 'Ödediğin taksitler' : 'Harcamayı ne zaman yaptın?'), skip: (d) => !tak(d),
-          ipucu: (d) => (d.mod === 'devam' ? 'Ödediğin taksit sayısını ve sıradaki taksidin hangi ekstrede ödeneceğini seç.' : 'Tarih, harcamanın hangi ekstreye gireceğini ve taksitlerin ne zaman biteceğini belirler.'),
-          html: (d) => {
-            if (d.mod !== 'devam') return fgrp('Tarih', fld('Harcama tarihi *', `<input id="wz-tarih" type="date" value="${esc(d.tarih)}">`));
-            const opts = dueOpts(d); if (!d.sonraki || !opts.includes(d.sonraki)) d.sonraki = opts[0];
-            return fgrp('Taksit durumu', fld('Ödediğin taksit sayısı *', `<input id="wz-odenen" type="number" min="0" max="59" step="1" inputmode="numeric" value="${esc(d.odenen)}" placeholder="Örn: 2">`)
-              + fld('Sıradaki taksit hangi ödemede?', `<select id="wz-sonraki">${opts.map((o, i) => `<option value="${o}" ${o === d.sonraki ? 'selected' : ''}>${C.fmtDate(o)}${i === 0 ? (isK(d) ? ' (sıradaki taksit günü)' : ' (sıradaki ekstre)') : ''}</option>`).join('')}</select>`));
-          },
-          read: (d, b) => { ['tarih', 'odenen', 'sonraki'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); }); },
-          live: (d) => { const p = spendPlan(d); if (!p) return '';
-            if (d.mod === 'devam') { const o = parseInt(d.odenen); return o >= 0 && o < p.n ? `${o} taksit ödendi, <b>${p.n - o}</b> taksit kaldı · son taksit <b>${C.fmtYM(C.ymAdd(p.ilkYm, p.n - 1))}</b>` : ''; }
-            return d.tarih ? (p.kmhAvans ? `İlk taksit <b>${C.fmtDate(p.ex.sonOdemeIso)}</b>, son taksit <b>${C.fmtYM(C.ymAdd(p.ilkYm, p.n - 1))}</b>` : `<b>${C.fmtDate(p.ex.kesimIso)}</b> ekstresine girer → ilk taksit <b>${C.fmtDate(p.ex.sonOdemeIso)}</b>, son taksit <b>${C.fmtYM(C.ymAdd(p.ilkYm, p.n - 1))}</b>`) : ''; },
-          validate: (d) => { if (d.mod === 'devam') { const o = parseInt(d.odenen), n = parseInt(d.n); return o >= 0 && o < n ? '' : `Ödediğin taksit sayısı 0 ile ${n - 1} arasında olmalı.`; } return d.tarih ? '' : 'Harcama tarihini seçin.'; } },
-        { soru: 'Kontrol et ve kaydet', skip: (d) => !tak(d),
-          html: (d) => kartInfo(d) + '<div id="wz-sum"></div><label class="chk wide" id="wz-gecmis-box" hidden><input id="wz-gecmis" type="checkbox" ' + (d.gecmisOdendi ? 'checked' : '') + '> <span>Tarihi geçmiş taksitleri ödedim</span></label>',
-          read: (d, b) => { const g = b.querySelector('#wz-gecmis'); if (g) d.gecmisOdendi = g.checked; },
-          liveTop: () => '',
-          live: (d) => { const p = spendPlan(d), el = $('wz-sum'), gb = $('wz-gecmis-box'); if (el) el.innerHTML = summary(d); if (gb) gb.hidden = !(p && p.gecmis > 0); return p && p.gecmis > 0 ? `<span class="muted">${p.gecmis} taksidin ödeme tarihi geçmiş${d.gecmisOdendi ? '; ödenmiş sayılacak' : '; gecikmiş görünecek'}.</span>` : ''; },
-          validate: (d) => { const p = spendPlan(d); return openingStatementConflict(p) || (p && p.asim && !p.devam ? 'Bu harcama kartın kullanılabilir limitini aşıyor.' : ''); } },
-      ],
+      receipt: true,
+      localDocument: true,
+      init: () => ({ src: pick, srcFixed: !!pre?.cat, tur: 'tek', mod: 'yeni', bil: 'tutar', n: '', tutar: pre?.demo ? '1.000' : '', aylik: '', tarih: C.isoOf(now()), ack: pre?.demo ? 'Örnek alışveriş' : '', faiz: '', odenen: '0', sonraki: '', gecmisOdendi: false }),
+      importer: (d, receipt) => {
+        if (!receipt.tutar) return { ok: false, msg: 'Belgede toplam tutar bulunamadı. Daha net bir fotoğraf seçebilir veya tutarı elle yazabilirsin.' };
+        d.tutar = trNum(receipt.tutar);
+        d.bil = 'tutar';
+        if (receipt.tarih) d.tarih = receipt.tarih;
+        if (receipt.aciklama) d.ack = receipt.aciklama;
+        if (receipt.taksit > 1 && !isK(d)) { d.tur = 'taksit'; d.n = String(receipt.taksit); }
+        return { ok: true, goto: 0 };
+      },
+      steps: [{ soru: 'Harcama bilgileri',
+        html: (d) => (d.srcFixed || srcs.length === 1 ? kartInfo(d) : fld('Kart veya hesap', `<select id="wz-src">${srcs.map((x) => `<option value="${x.key}" ${x.key === d.src ? 'selected' : ''}>${esc(x.ad)}</option>`).join('')}</select>`))
+          + documentFields('Fiş, slip veya dekonttan doldur', pre?.document)
+          + fgrp('İşlem',
+            (!isK(d) || kmhLim(d) ? fld('İşlem türü', `<select id="wz-stur">${(isK(d) ? [['tek', 'Hesap harcaması'], ['avans', 'Taksitli nakit avans (artı para)']] : SPEND_TUR).map(([value, label]) => `<option value="${value}" ${d.tur === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`) : '')
+            + (tak(d) ? fld('Bildiğin tutar', `<select id="wz-bil"><option value="tutar">Ana para / işlem tutarı</option><option value="taksit" ${d.bil === 'taksit' ? 'selected' : ''}>Aylık taksit</option></select>`) : '')
+            + (tak(d) && d.bil === 'taksit' ? fld('Aylık taksit (₺)', moneyIn('wz-aylik', d.aylik)) : fld('İşlem tutarı (₺)', moneyIn('wz-tutar', d.tutar)))
+            + fld('İşlem tarihi', `<input id="wz-tarih" type="date" value="${esc(d.tarih)}">`)
+            + fld('Açıklama', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`))
+          + (tak(d) ? fgrp('Ödeme planı',
+            fld('Toplam taksit', `<input id="wz-n" type="number" min="2" max="60" step="1" value="${esc(d.n)}">`)
+            + fld('Ödenen taksit', `<input id="wz-odenen" type="number" min="0" step="1" value="${esc(d.odenen)}">`)
+            + fld('Sıradaki vade (isteğe bağlı)', `<input id="wz-sonraki" type="date" value="${esc(d.sonraki)}">`)
+            + fld('Aylık faiz (%)', moneyIn('wz-faiz', d.faiz) + '<small class="hint" id="wz-rate-hint">Faizsiz taksit için 0 yaz.</small>')) : ''),
+        read: (d, b) => {
+          ['tutar', 'aylik', 'tarih', 'ack', 'n', 'odenen', 'sonraki', 'faiz', 'bil'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); });
+          const prevSrc = d.src;
+          d.src = wzVal(b, 'wz-src') || d.src;
+          d.tur = prevSrc === d.src ? wzVal(b, 'wz-stur') || d.tur : 'tek';
+          d.mod = tak(d) && d.sonraki ? 'devam' : 'yeni';
+        },
+        live: (d) => {
+          const p = spendPlan(d);
+          if (!p) return '';
+          const hint = $('wz-rate-hint');
+          if (hint) hint.textContent = `Boşsa TCMB azami oranı (${pct(spendRate({ ...d, faiz: '' }, p.src))}) ile tahmin edilir. Faizsiz taksit için 0 yaz.`;
+          if (!(p.tutar > 0) || (tak(d) && !(Number(d.n) >= 2))) return '';
+          return summary(d) + (tak(d) ? `<details><summary>Ödeme tarihleri</summary><ul class="list compact">${p.taksitler.map((t) => `<li><span>${t.no}. taksit · ${C.fmtDate(t.vade_tarihi)}</span><b>${M(t.tutar)}${t.odendi ? ' · Ödendi' : ''}</b></li>`).join('')}</ul></details>` : '');
+        },
+        validate: (d) => {
+          if (!d.tarih) return 'İşlem tarihini seç.';
+          if (tak(d)) {
+            if (!Number.isInteger(Number(d.n)) || Number(d.n) < 2 || Number(d.n) > 60) return 'Toplam taksiti 2 ile 60 arasında gir.';
+            if (!Number.isInteger(Number(d.odenen)) || Number(d.odenen) < 0 || Number(d.odenen) >= Number(d.n)) return 'Ödenen taksit, toplam taksitten az olmalı.';
+            if (d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 20)) return 'Aylık faizi 0 ile 20 arasında gir.';
+          }
+          const p = spendPlan(d);
+          if (!p || !(p.tutar > 0)) return 'Tutarı gir.';
+          if (p.kmh && d.tarih > C.isoOf(now())) return 'Hesap harcamasının tarihi gelecekte olamaz.';
+          return openingStatementConflict(p) || (p.asim && !p.devam ? 'Kullanılabilir bakiye veya limit yetersiz.' : '');
+        } }],
       save: (d) => {
         const p = spendPlan(d); if (!p) return;
         ui.lastSrc = d.src;
@@ -2634,6 +2649,28 @@
       },
     });
   }
+  function openAccountTransaction(pid, iid) {
+    const account = db.kmh_hesaplar.find((a) => a.id === pid);
+    const record = account?.islemler?.find((entry) => entry.id === iid);
+    if (!record) return;
+    openWiz({
+      baslik: 'Hesap işlemini düzenle',
+      init: () => ({ tutar: trNum(record.tutar), tarih: record.tarih, ack: record.aciklama || '' }),
+      steps: [{ soru: record.yon === 'giris' ? 'Para girişi' : 'Harcama',
+        html: (d) => fgrp('İşlem', fld('Tutar (₺)', moneyIn('wz-tutar', d.tutar))
+          + fld('Tarih', `<input id="wz-tarih" type="date" value="${esc(d.tarih)}">`)
+          + fld('Açıklama', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`)),
+        read: (d, b) => { ['tutar', 'tarih', 'ack'].forEach((k) => { d[k] = wzVal(b, 'wz-' + k); }); },
+        validate: (d) => !(posNum(d.tutar) > 0) ? 'Tutarı gir.' : !d.tarih || d.tarih > C.isoOf(now()) ? 'Bugünün veya geçmiş bir günün tarihini seç.' : '' }],
+      save: (d) => {
+        const snap = JSON.stringify(db), tutar = C.r2(posNum(d.tutar));
+        account.bakiye = C.r2(C.hesapBakiye(account) + (record.yon === 'giris' ? 1 : -1) * (tutar - record.tutar));
+        Object.assign(record, { tutar, tarih: d.tarih, aciklama: d.ack.trim() });
+        save('İşlem güncellendi.', snap);
+      },
+    });
+  }
+
   /** Vadesiz hesaba para girişi (maaş, havale) */
   function openDeposit(id, borc) {
     const a = db.kmh_hesaplar.find((x) => x.id === id); if (!a) return;
@@ -2730,9 +2767,15 @@
   const KREDI_TURLERI = [['İhtiyaç Kredisi', 'İhtiyaç / tüketici kredisi'], ['Taşıt Kredisi', 'Taşıt kredisi'], ['Konut Kredisi', 'Konut kredisi (BSMV/KKDF yok)']];
   function kalanPlan(d, nFixed) {
     const tur = d.tur || 'İhtiyaç Kredisi';
-    return C.loanPlan({ aylik: posNum(d.aylik), kalan: parseInt(d.kalan) || 0, n: nFixed != null ? nFixed : (parseInt(d.toplam) || 0),
-      faiz: String(d.faiz ?? '').trim() === '' ? null : num(d.faiz), ana: posNum(d.ana) || null,
-      faizDefault: krediDefaultFaiz(tur), vergi: C.vergiFor(S(), tur), konut: tur === 'Konut Kredisi' });
+    const kalan = parseInt(d.kalan) || 0;
+    const n = nFixed ?? (parseInt(d.toplam) || 0);
+    const faiz = String(d.faiz ?? '').trim() === '' ? null : num(d.faiz);
+    const ana = posNum(d.ana) || null, vergi = C.vergiFor(S(), tur);
+    const faizDefault = d.kmhPlan ? (R()?.nakit_kmh?.akdi ?? 4.25) : krediDefaultFaiz(tur);
+    const aylik = d.loanAmount === 'ana'
+      ? C.annuityPayment(ana, faiz ?? faizDefault, n || kalan, vergi)
+      : posNum(d.aylik);
+    return C.loanPlan({ aylik, kalan, n, faiz: d.loanAmount === 'ana' ? faiz ?? faizDefault : faiz, ana, faizDefault, vergi, konut: tur === 'Konut Kredisi' });
   }
   function openAddKalan(editId, pre) {
     const tur0 = 'İhtiyaç Kredisi';
@@ -2752,9 +2795,23 @@
       baslik: (editId ? 'Krediyi düzenle' : (kmhPlan ? 'KMH taksit planı' : 'Taksitli kredi / borç ekle')) + (pre && pre.queue ? ` · ${pre.queue}` : ''),
       saveLabel: editId ? 'Değişiklikleri kaydet' : 'Borcu kaydet',
       onSkip: pre && pre.onSkip,
+      localDocument: true,
+      importer: existing ? null : (d, result) => {
+        if (result.kind !== 'kredi' || !(result.aylik || result.ana || result.kalan)) return { ok: false, msg: 'Kredi bilgisi bulunamadı. Ödeme planını veya kredi dekontunu daha net yükle.' };
+        if (result.aylik > 0) { d.aylik = trNum(result.aylik); d.loanAmount = 'aylik'; }
+        else if (result.ana > 0) d.loanAmount = 'ana';
+        if (result.kalan > 0) d.kalan = String(result.kalan);
+        if (result.toplam > 0) d.toplam = String(result.toplam);
+        if (result.sonraki) d.sonraki = result.sonraki;
+        if (result.ana > 0) d.ana = trNum(result.ana);
+        if (result.faiz != null) d.faiz = trNum(result.faiz);
+        if (BANKALAR.includes(result.banka)) d.banka = result.banka;
+        if (KREDI_TURLERI.some(([tur]) => tur === result.tur)) d.tur = result.tur;
+        return { ok: true, goto: 0 };
+      },
       init: () => {
         if (!existing) {
-          const base = { ad: '', banka: '', tur: tur0, aylik: '', kalan: '', sonraki: '', toplam: '', ana: '', faiz: '' };
+          const base = { ad: '', banka: '', tur: tur0, kmhPlan, loanAmount: 'aylik', aylik: '', kalan: '', sonraki: '', toplam: '', ana: '', faiz: '' };
           const x = pre && pre.d ? Object.assign(base, pre.d) : base;
           if (!x.faizManual) x.faiz = '';      // bilinmeyen faiz: alan boş kalır, ortalama faizle tahmin gösterilir
           return x;
@@ -2762,8 +2819,9 @@
         return { ad: existing.kredi_adi, banka: existing.banka === 'Diğer' ? '' : existing.banka, tur: existing.kredi_turu || tur0, aylik: firstPending ? trNum(firstPending.tutar) : '', kalan: String(pending.length), sonraki: firstPending ? firstPending.vade_tarihi : '', toplam: '', ana: trNum(existing.ana_para), faiz: trNum(existing.faiz_orani) };
       },
       steps: [{ soru: existing ? 'Kredi bilgileri' : 'Kredinin bilgileri', ipucu: existing ? 'Ödenmiş taksitler korunur; yalnızca kalan taksitler yeniden düzenlenir.' : 'Bankanın uygulamasındaki kredi ekranında yazan bilgileri gir. Yıldızlı (*) alanlar yeterli.',
-        html: (d) => fgrp('Taksitler',
-            fld('Aylık taksit tutarı (₺) *', moneyIn('wz-aylik', d.aylik))
+        html: (d) => (existing ? '' : documentFields('Dekont veya ödeme planından doldur', pre?.document)) + fgrp('Taksitler',
+            (existing ? '' : fld('Bildiğin tutar', `<select id="wz-loanAmount"><option value="aylik">Aylık taksit</option><option value="ana" ${d.loanAmount === 'ana' ? 'selected' : ''}>Çekilen ana para</option></select>`))
+            + (d.loanAmount === 'ana' ? fld('Çekilen ana para (₺) *', moneyIn('wz-ana', d.ana)) : fld('Aylık taksit tutarı (₺) *', moneyIn('wz-aylik', d.aylik)))
             + fld('Sıradaki taksit tarihi *', `<input id="wz-sonraki" type="date" value="${esc(d.sonraki)}">`)
             + fld('Kalan taksit sayısı *', `<input id="wz-kalan" type="number" min="1" max="360" step="1" inputmode="numeric" value="${esc(d.kalan)}" placeholder="Örn: 5">`))
           + `<details class="wide"${existing || (pre && pre.d) ? ' open' : ''}><summary>Varsa kredi ayrıntılarını ekle</summary>${fgrp('Kredi',
@@ -2775,8 +2833,8 @@
               : fld('Toplam taksit sayısı (vade)', `<input id="wz-toplam" type="number" min="1" max="360" step="1" inputmode="numeric" value="${esc(d.toplam)}" placeholder="Boşsa kalan kadar"><small class="hint">Kredi kaç ay vadeliydi? Örn: 24. Ödenmiş taksitler buna göre hesaplanır.</small>`)))
           + fgrp('Faiz ve çekilen tutar',
             fld('Aylık faiz oranı (%)', `<input id="wz-faiz" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.faiz)}"><small class="hint" id="wz-faiz-hint"></small>`)
-            + fld('Çekilen tutar / ana para (₺)', `<input id="wz-ana" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.ana)}"><small class="hint" id="wz-ana-hint"></small>`))}</details>`,
-        read: (d, b) => { ['aylik', 'kalan', 'sonraki', 'ad', 'banka', 'toplam', 'ana', 'faiz', 'tur'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); }); },
+            + (d.loanAmount === 'ana' ? '' : fld('Çekilen tutar / ana para (₺)', `<input id="wz-ana" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.ana)}"><small class="hint" id="wz-ana-hint"></small>`)))}</details>`,
+        read: (d, b) => { ['aylik', 'kalan', 'sonraki', 'ad', 'banka', 'toplam', 'ana', 'faiz', 'tur', 'loanAmount'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); }); },
         liveTop: (d) => {
           const p = kalanPlan(d, nOf(d)), b = wizBody(), tur = d.tur || tur0, konut = tur === 'Konut Kredisi';
           const fe = b.querySelector('#wz-faiz'), ae = b.querySelector('#wz-ana'), fh = b.querySelector('#wz-faiz-hint'), ah = b.querySelector('#wz-ana-hint');
@@ -2784,26 +2842,25 @@
           if (ae) ae.placeholder = p.ana != null && p.anaSrc !== 'girdi' ? `${p.anaSrc === 'tahmin' ? 'tahmini ' : 'hesaplanan '}${p.ana.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Bilmiyorsan boş bırak';
           if (fh) fh.textContent = konut ? 'Sözleşmedeki aylık oran. Konut kredisinde BSMV ve KKDF alınmaz.' : 'Sözleşmedeki aylık oran. Faize ayrıca %15 BSMV + %15 KKDF eklenir; hesapta dahil edilir.';
           if (ah) ah.textContent = 'Bankadan ilk çektiğin tutar. Boş bırakırsan taksit, vade ve faizden hesaplanır.';
-          if (!(p.aylik > 0) || !(p.kalan >= 1)) { d._sumHtml = ''; return '<div class="bigresult"><small>Aylık taksiti ve kalan taksit sayısını yaz; kalan borcun burada görünür.</small></div>'; }
+          if (!(p.aylik > 0) || !(p.kalan >= 1)) { d._sumHtml = ''; return '<div class="bigresult"><small>Tutarı ve kalan taksiti girince borç özeti burada görünür.</small></div>'; }
           const sonYm = d.sonraki ? C.ymAdd(d.sonraki.slice(0, 7), p.kalan - 1) : null;
           const rows = [
             ['Ödenen / kalan taksit', `${p.odenen} / ${p.kalan} (toplam ${p.n})`],
             sonYm ? ['Son taksit', C.fmtYM(sonYm)] : null,
             ['Çekilen tutar', M(p.ana) + srcTag(p.anaSrc)],
-            ['Aylık faiz', `%${trNum(p.faiz)}` + srcTag(p.faizSrc) + (konut ? '' : ` <small class="muted">(vergiyle %${trNum(C.r2(p.faiz * p.vergi))})</small>`)],
+            ['Aylık faiz', `%${trNum(p.faiz)}` + srcTag(d.loanAmount === 'ana' && d.faiz === '' ? 'varsayilan' : p.faizSrc) + (konut ? '' : ` <small class="muted">(vergiyle %${trNum(C.r2(p.faiz * p.vergi))})</small>`)],
             ['Toplam geri ödeme', M(p.toplamOdeme)],
             ['Toplam faiz ve vergi', `<span class="bad-t">${M(p.toplamFaiz)}</span>`],
             ['Bugün kapatırsan yaklaşık', `${M(p.kalanAnapara + p.tazminat)} <small class="muted">(anapara ${M(p.kalanAnapara)} + erken ödeme tazminatı en çok %${trNum(p.tazminatOran)})</small>`],
           ].filter(Boolean);
-          d._sumHtml = `<details><summary>Hesaplanan kredi ayrıntıları</summary><table class="wizsum compact"><tbody>${rows.map(([a, v]) => `<tr><td>${a}</td><td>${v}</td></tr>`).join('')}</tbody></table>`
+          d._sumHtml = `<details><summary>Faiz ve ödeme ayrıntıları</summary><table class="wizsum compact"><tbody>${rows.map(([a, v]) => `<tr><td>${a}</td><td>${v}</td></tr>`).join('')}</tbody></table>`
             + (p.faizSrc === 'varsayilan' ? '<p class="hint" style="margin:6px 0 0">Faiz ve çekilen tutar bilinmediği için ortalama faizle tahmin edildi. Sözleşmendeki oranı yazarsan tahmin güncellenir.</p>' : '') + '</details>';
-          return `<div class="bigresult"><span>Kalan borcun</span><b>${M(p.kalanBorc)}</b><small>${p.kalan} taksit × ${M(p.aylik)}${sonYm ? ' · son taksit ' + C.fmtYM(sonYm) : ''}</small></div>`
+          return `<div class="bigresult"><span>Kalan borcun</span><b>${M(p.kalanBorc)}</b><small>${p.kalan} taksit × ${M(p.aylik)}${sonYm ? ' · son taksit ' + C.fmtYM(sonYm) : ''}</small><small>Kalan ana para ${M(p.kalanAnapara)} · kalan faiz ve vergi ${M(Math.max(0, p.kalanBorc - p.kalanAnapara))}</small></div>`
             + (p.hata ? `<div class="issue uyari"><b>Kontrol et:</b> ${esc(p.hata)}</div>` : '');
         },
         live: (d) => d._sumHtml || '',
         validate: (d) => {
-          if (existing && !scheduleChanged(d) && !(posNum(d.aylik) > 0)) return 'Aylık taksit tutarını yazın.';
-          if (!(posNum(d.aylik) > 0)) return 'Aylık taksit tutarını yazın.';
+          if (d.loanAmount === 'ana' ? !(posNum(d.ana) > 0) : !(posNum(d.aylik) > 0)) return 'Bildiğin tutarı gir.';
           const kn = parseInt(d.kalan); if (!(kn >= 1 && kn <= 360)) return 'Kaç taksit kaldığını yazın (1 ile 360 arası).';
           if (!d.sonraki) return 'Sıradaki taksidin tarihini seçin.';
           if (!existing && String(d.toplam).trim() !== '') { const tn = parseInt(d.toplam); if (!(tn >= kn && tn <= 360)) return `Toplam taksit sayısı kalan taksitten (${kn}) az olamaz.`; }
@@ -2858,7 +2915,7 @@
           return;
         }
         db.krediler.push({ id: nextId(db.krediler, 300), banka: d.banka || 'Diğer', kredi_adi: ad, kredi_turu: tur, kullanim_tarihi: C.dueDate(C.ymAdd(ilkYm, -1), gun), ilk_taksit_ym: ilkYm, odeme_gunu: gun, ana_para: p.ana, faiz_orani: p.faiz, toplam_geri_odeme: toplam, toplam_taksit: p.n, taksitler });
-        ui.debtFilter = 'ALL';
+        ui.debtFilter = 'KREDI';
         save('Kredi kaydedildi.');
         if (pre && pre.onDone) pre.onDone();
       },
@@ -3426,7 +3483,7 @@
     const wzs = ev.target.closest && ev.target.closest('[data-wzset]');
     if (wzs) { const [id, v] = wzs.dataset.wzset.split(':'); const el = $(id); if (el) { el.value = v; wizLive(el); } return; }
     const closeBtn = ev.target.closest('[data-close]');
-    if (closeBtn) { closeBtn.closest('dialog').close(); return; }
+    if (closeBtn) { closeBtn.closest('dialog')?.close(); return; }
     const nav = ev.target.closest('[data-nav]');
     if (nav) { const dl = nav.closest('dialog'); if (dl && dl.open) dl.close(); setView(nav.dataset.nav); return; }
     const dfBtn = ev.target.closest('[data-debt-filter]');
@@ -3443,7 +3500,7 @@
       return;
     }
     if (act === 'today-expand') { ui.todayExpanded = !ui.todayExpanded; return render(); }
-    if (act === 'choose-debt-file') { $('wz-file').click(); return; }
+    if (act === 'choose-debt-file') { $(d.input || 'wz-file').click(); return; }
     if (act === 'pick') return; // onay kutusu değişiminde işlenir
     if (act === 'toggle-details' || (act === 'toggle' && !ev.target.closest('button,input'))) { ui.instDlg = d.key; openInst(); return; }
     if (act === 'sel-acc') { ui[d.cat === 'KMH' ? 'selKmh' : 'selKart'] = id; ui.open = null; ui.accDlg = { cat: d.cat, id }; render(); openAcc(); return; }
@@ -3473,18 +3530,22 @@
       });
       return;
     }
+    if (act === 'import-account') return openSpend({ cat: d.cat, id, document: true });
+    if (act === 'import-loan') return openAddKalan(null, { document: true });
     if (act === 'add-har') { const dl = el.closest('dialog'); if (dl && dl.open && dl.id !== 'dlg-wiz') dl.close(); return openSpend(d.cat ? { cat: d.cat, id: pid } : null); }
     if (act === 'add-spend') return openSpend();
     if (act === 'home-ym') { ui.homeYm = C.ymAdd(ui.homeYm || C.ymOf(new Date()), parseInt(d.d) || 0); return render(); }
     if (act === 'tour') return startTour(true);
     if (act === 'hesap-giris') { const dl = el.closest('dialog'); if (dl && dl.open) dl.close(); return openDeposit(id, d.tutar ? Number(d.tutar) : 0); }
+    if (act === 'edit-islem') return openAccountTransaction(pid, iid);
     if (act === 'del-islem') {
       const a = db.kmh_hesaplar.find((x) => x.id === pid); if (!a) return;
       return removeWithUndo(() => { C.hesapIslemSil(a, iid); }, 'İşlem silindi; bakiye düzeltildi.');
     }
     if (act === 'edit-har') {
       const it = findItem(d.cat, pid, iid);
-      if (d.cat === 'KART' && (it?.ekstre_baslangic || hasLinkedCardPayment(db.kredi_kartlari.find((k) => k.id === pid) || {}, iid))) return;
+      if (d.cat === 'KART' && hasLinkedCardPayment(db.kredi_kartlari.find((k) => k.id === pid) || {}, iid)) return;
+      if (it?.ekstre_baslangic) return openOpeningStatement(pid, iid);
       return it && it.gecikmis ? openGec(d.cat, pid, iid) : openHar(d.cat, pid, iid);
     }
     if (act === 'add-gec') return openGec(d.cat, pid);
@@ -3537,7 +3598,8 @@
       });
       return;
     }
-    if (act === 'add-kredi' || act === 'add-debt') return openAddDebt();
+    if (act === 'add-kredi') return openAddKalan();
+    if (act === 'add-debt') return openAddDebt();
     if (act === 'edit-kredi') { if ($('dlg-inst') && $('dlg-inst').open) $('dlg-inst').close(); return openAddKalan(iid); }
     if (act === 'del-kredi') {
       const loan = db.krediler.find((x) => x.id === iid); if (!loan) return;
@@ -3787,7 +3849,14 @@
   });
   document.addEventListener('input', (ev) => {
     const id = ev.target.id || '';
-    if (ev.target.closest && ev.target.closest('#dlg-wiz')) { wizLive(ev.target); return; }
+    if (ev.target.closest && ev.target.closest('#dlg-wiz')) {
+      if (['wz-src', 'wz-stur', 'wz-bil', 'wz-loanAmount'].includes(id)) {
+        wizSteps()[wiz.i].read(wiz.d, wizBody());
+        renderWiz();
+        $(id)?.focus();
+      } else wizLive(ev.target);
+      return;
+    }
     if (ev.target.closest && ev.target.closest('#dlg-kapat')) { if (ev.target.dataset.kpT) { kp.tutar[ev.target.dataset.kpT] = num(ev.target.value); kapatLive(); } else if (id === 'kp-masraf') kapatLive(); return; }
     if (ev.target.dataset.gf) { ui.gf[ev.target.dataset.gf] = ev.target.value; return; }
     if (ev.target.dataset.gl) { ui.gl[ev.target.dataset.gl] = ev.target.value; return; }

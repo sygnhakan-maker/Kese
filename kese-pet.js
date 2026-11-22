@@ -78,7 +78,7 @@
     ['harcama', '＋', 'Harcama ekle', 'Karttan veya hesaptan'],
     ['kart', '💳', 'Kredi kartı ekle', 'Limit, kesim, son ödeme'],
     ['hesapv', '🏦', 'Hesap ekle', 'Vadesiz, artı para limitiyle'],
-    ['kalan', '📄', 'Kredili ürün ekle', 'Kredi veya taksitli borç'],
+    ['kalan', '📄', 'Kredi ekle', 'Ödeme planı veya dekont'],
   ];
   let fabOpen = false;
   function buildFab() {
@@ -86,7 +86,7 @@
     const bd = document.createElement('div'); bd.id = 'fab-bd'; bd.className = 'fab-bd'; bd.hidden = true;
     const f = document.createElement('div'); f.id = 'fab'; f.className = 'fab'; f.setAttribute('role', 'menu'); f.setAttribute('aria-label', 'Ekle menüsü'); f.hidden = true;
     f.innerHTML = FAB_ITEMS.map(([go, ic, t, sub]) => `<button type="button" class="fab-item" data-wzgo="${go}" role="menuitem"><span class="fab-tx"><b>${t}</b><small>${sub}</small></span><span class="fab-ic" aria-hidden="true">${ic}</span></button>`).join('')
-      + `<div class="fab-more" role="none"><button type="button" class="fab-mini" data-wzgo="elden" role="menuitem">Elden borç</button><button type="button" class="fab-mini" data-wzgo="gecikmis" role="menuitem">Gecikmiş kart borcu</button><button type="button" class="fab-mini" data-wzgo="dosya" role="menuitem">Ekran görüntüsünden</button></div>`;
+      + `<div class="fab-more" role="none"><button type="button" class="fab-mini" data-wzgo="elden" role="menuitem">Elden borç</button></div>`;
     document.body.appendChild(bd); document.body.appendChild(f);
     const dock = $('#dock');
     if (dock && !$('.dock-fab-label', dock)) { const l = document.createElement('span'); l.className = 'dock-fab-label'; l.setAttribute('aria-hidden', 'true'); l.textContent = 'Ne ekleyelim?'; dock.insertBefore(l, $('.dock-add', dock)); }

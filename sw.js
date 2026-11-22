@@ -1,6 +1,6 @@
 /* Kese service worker: çevrimdışı çalışma. Verilere (localStorage) dokunmaz; yalnızca uygulama dosyalarını önbelleğe alır.
  * Yeni sürüm yayınlarken SADECE aşağıdaki VERSION değerini artırın. */
-const VERSION = 'kese-v27';
+const VERSION = 'kese-v28';
 const SHELL = ['./', 'index.html', 'style.css', 'ui.css', 'ui-pages.css', 'ui-forms.css', 'ui-panels.css', 'ui-fix.css', 'dock.js', 'kese-pet.js', 'fonts/inter-latin.woff2', 'fonts/inter-latin-ext.woff2', 'icons/mascot-96.png', 'icons/mascot-400.png', 'ai.js', 'app.js', 'live.js', 'calc.js', 'import.js', 'store.js', 'sync.js', 'config.js', 'vendor/supabase.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon-32.png', 'rates.json'];
 
 self.addEventListener('install', (e) => {
