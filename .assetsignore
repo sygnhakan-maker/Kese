@@ -1,0 +1,15 @@
+.git
+.git/**
+.wrangler
+.wrangler/**
+node_modules
+node_modules/**
+push
+push/**
+tests
+tests/**
+*.md
+wrangler*.*
+.dev.vars*
+.env*
+.assetsignore

@@ -201,3 +201,7 @@ dialog .live { border-radius: 14px; }
 @media (max-width: 860px) and (prefers-reduced-motion: reduce) {
   dialog[open], dialog#dlg-onay[open] { animation: none !important; }
 }
+
+/* Keep the estimate in reading order while a mobile keyboard takes up space. */
+#dlg-wiz .live.top { position: static; }
+#dlg-wiz .bigresult small { display: block; }

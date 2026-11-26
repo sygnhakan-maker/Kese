@@ -74,74 +74,87 @@
   // ======================================================================
   // 1) Açılır "+" menüsü
   // ======================================================================
-  const FAB_ITEMS = [
-    ['harcama', '＋', 'Harcama ekle', 'Karttan veya hesaptan'],
-    ['kart', '💳', 'Kredi kartı ekle', 'Limit, kesim, son ödeme'],
-    ['hesapv', '🏦', 'Hesap ekle', 'Vadesiz, artı para limitiyle'],
-    ['kalan', '📄', 'Kredi ekle', 'Ödeme planı veya dekont'],
-  ];
   let fabOpen = false;
-  function buildFab() {
-    if ($('#fab')) return;
-    const bd = document.createElement('div'); bd.id = 'fab-bd'; bd.className = 'fab-bd'; bd.hidden = true;
-    const f = document.createElement('div'); f.id = 'fab'; f.className = 'fab'; f.setAttribute('role', 'menu'); f.setAttribute('aria-label', 'Ekle menüsü'); f.hidden = true;
-    f.innerHTML = FAB_ITEMS.map(([go, ic, t, sub]) => `<button type="button" class="fab-item" data-wzgo="${go}" role="menuitem"><span class="fab-tx"><b>${t}</b><small>${sub}</small></span><span class="fab-ic" aria-hidden="true">${ic}</span></button>`).join('')
-      + `<div class="fab-more" role="none"><button type="button" class="fab-mini" data-wzgo="elden" role="menuitem">Elden borç</button></div>`;
-    document.body.appendChild(bd); document.body.appendChild(f);
-    const dock = $('#dock');
-    if (dock && !$('.dock-fab-label', dock)) { const l = document.createElement('span'); l.className = 'dock-fab-label'; l.setAttribute('aria-hidden', 'true'); l.textContent = 'Ne ekleyelim?'; dock.insertBefore(l, $('.dock-add', dock)); }
-    bd.addEventListener('click', () => closeFab());
-  }
-  function placeFab() {
-    const btn = $('#fab-btn'), f = $('#fab'); if (!btn || !f) return;
-    const r = btn.getBoundingClientRect();
-    f.style.right = `${Math.max(8, innerWidth - r.right)}px`;
-    f.style.bottom = `${Math.max(70, innerHeight - r.top + 10)}px`;
+  let menuPage = 'main';
+  const menu = $('#fab'), menuButton = $('#fab-btn'), menuShade = $('#fab-bd');
+  function showMenuPage(page, focusTarget) {
+    menuPage = page;
+    menu.querySelectorAll('[data-menu-page]').forEach((group) => { group.hidden = group.dataset.menuPage !== page; });
+    menu.querySelector('[data-menu-back]').hidden = page === 'main';
+    const first = focusTarget || menu.querySelector('[data-menu-page]:not([hidden]) button');
+    first?.focus({ preventScroll: true });
+    menu.scrollTop = 0;
   }
   function openFab() {
-    buildFab(); fabOpen = true; placeFab();
-    const f = $('#fab'), bd = $('#fab-bd'), dock = $('#dock'), btn = $('#fab-btn');
-    f.hidden = false; bd.hidden = false;
-    requestAnimationFrame(() => { f.classList.add('open'); bd.classList.add('open'); dock && dock.classList.add('fab-open'); });
-    btn && btn.setAttribute('aria-expanded', 'true'); play('whoosh');
+    fabOpen = true;
+    menu.hidden = menuShade.hidden = false;
+    menuShade.classList.add('open');
+    $('#dock').classList.add('fab-open');
+    menuButton.setAttribute('aria-expanded', 'true');
+    menuButton.setAttribute('aria-label', 'Menüyü kapat');
+    showMenuPage('main');
+    play('whoosh');
     pet.react('fab');
-    setTimeout(() => { const first = $('.fab-item', f); first && first.focus({ preventScroll: true }); }, 220);
   }
-  function closeFab(instant) {
-    if (!fabOpen) return; fabOpen = false;
-    const f = $('#fab'), bd = $('#fab-bd'), dock = $('#dock'), btn = $('#fab-btn');
-    f.classList.remove('open'); bd.classList.remove('open'); dock && dock.classList.remove('fab-open');
-    btn && btn.setAttribute('aria-expanded', 'false'); if (!instant) play('back');
-    setTimeout(() => { if (!fabOpen) { f.hidden = true; bd.hidden = true; } }, instant || reduce() ? 0 : 320);
+  function closeFab(quiet) {
+    if (!fabOpen) return;
+    fabOpen = false;
+    menu.hidden = menuShade.hidden = true;
+    menuShade.classList.remove('open');
+    $('#dock').classList.remove('fab-open');
+    menuButton.setAttribute('aria-expanded', 'false');
+    menuButton.setAttribute('aria-label', 'Menüyü aç');
+    if (!quiet) play('back');
   }
-  document.addEventListener('click', (e) => {
-    const t = e.target.closest && e.target.closest('[data-act="fab-toggle"]');
-    if (t) { e.preventDefault(); fabOpen ? closeFab() : openFab(); return; }
-    if (e.target.closest && e.target.closest('#fab [data-wzgo]')) { setTimeout(() => closeFab(), 0); }
+  function goBack() {
+    if (menuPage !== 'main') {
+      const previous = menu.querySelector(`[data-menu-target="${menuPage}"]`);
+      showMenuPage('main', previous);
+    } else {
+      closeFab();
+      menuButton.focus();
+    }
+  }
+  menuButton.addEventListener('click', () => { if (fabOpen) closeFab(); else openFab(); });
+  menuShade.addEventListener('click', () => { closeFab(); menuButton.focus(); });
+  menu.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.menuTarget) { showMenuPage(button.dataset.menuTarget); return; }
+    if (button.hasAttribute('data-menu-back')) { goBack(); return; }
+    closeFab(true);
+    menuButton.focus({ preventScroll: true });
   });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && fabOpen) { closeFab(); const b = $('#fab-btn'); b && b.focus(); } });
-  window.addEventListener('resize', () => { if (fabOpen) placeFab(); });
+  document.addEventListener('keydown', (event) => {
+    if (!fabOpen) return;
+    if (event.key === 'Escape') { event.preventDefault(); goBack(); return; }
+    if (event.key !== 'Tab') return;
+    const choices = [...menu.querySelectorAll('button')].filter((button) => !button.closest('[hidden]'));
+    const order = [...choices, menuButton];
+    const current = order.indexOf(document.activeElement);
+    event.preventDefault();
+    order[(current + (event.shiftKey ? -1 : 1) + order.length) % order.length].focus();
+  });
 
   // ======================================================================
   // 2) Kese arkadaş
   // ======================================================================
   const ACTS = {
-    cay: { prop: '☕', cls: 'a-cay', sfx: 'sip', says: ['Çay molası ☕ Sen de bir bardak al.', 'Hmm, demli olmuş.', 'Çay içmeden hesap yapılmaz!'] },
-    reels: { prop: '📱', cls: 'a-reels', sfx: 'giggle', says: ['Hahaha bu kedi videosu çok iyi 😂', 'Bir reels daha, sonra bırakıyorum… söz.', '"Para biriktirme taktikleri" diye video çıktı, izliyorum.'] },
-    uyku: { prop: '💤', cls: 'a-uyku', sfx: 'snore', says: ['Zzz… faiz… oranları… zzz', 'Biraz uzanayım, gözümü dinlendiriyorum.', 'Uyuyorum, ödemeler kaçmasın 😴'] },
-    otur: { prop: '', cls: 'a-otur', sfx: 'pop', says: ['Oh be, biraz oturayım.', 'Ayaklarım yoruldu, mola!', 'Şuracığa oturup seni izliyorum 👀'] },
-    dans: { prop: '🎵', cls: 'a-dans', sfx: 'pop', says: ['Ödemeler zamanında, ben de dans ediyorum 🎶', 'Borç azalıyor, keyfim yerinde!'] },
-    hesap: { prop: '🧮', cls: 'a-hesap', sfx: 'step', says: ['Bir saniye, hesap yapıyorum…', 'Taksitleri tek tek sayıyorum, merak etme.'] },
+    cay: { prop: '☕', cls: 'a-cay', sfx: 'sip', says: ['Çay molası ☕', 'Hmm, demli olmuş.'] },
+    reels: { prop: '📱', cls: 'a-reels', sfx: 'giggle', says: ['Şu kediye bak! 😄', 'Bir video daha…'] },
+    uyku: { prop: '💤', cls: 'a-uyku', sfx: 'snore', says: ['Zzz…', 'Biraz kestireyim.'] },
+    otur: { prop: '', cls: 'a-otur', sfx: 'pop', says: ['Biraz oturayım.', 'Mola!'] },
+    dans: { prop: '🎵', cls: 'a-dans', sfx: 'pop', says: ['Dans zamanı 🎶', 'Hop!'] },
+    hesap: { prop: '🧮', cls: 'a-hesap', sfx: 'step', says: ['Bir, iki, üç…', 'Hesap zamanı.'] },
     selam: { prop: '', cls: 'a-selam', sfx: 'pop', says: [] },
     neseli: { prop: '', cls: 'a-neseli', sfx: 'ding', says: [] },
     uzgun: { prop: '', cls: 'a-uzgun', says: [] },
     sasir: { prop: '', cls: 'a-sasir', sfx: 'pop', says: [] },
     seksek: { prop: '', cls: 'a-seksek', says: [] },
   };
-  const TAP_SAYS = ['Gıdıklanıyorum! 😆', 'Kese burada, keseni korur!', 'Bugün bir harcama girdin mi? + düğmesi hep orada.', 'Kesem boş değil, sadece diyette 😄', 'Beni sürükleyip istediğin yere koyabilirsin.', 'Asgari ödeme tuzak, tamamını ödemek en iyisi!', 'Kartın kesim gününden hemen sonra yaptığın harcama bir sonraki ekstreye kalır; akıllıca!', 'Her taksit bitişi küçük bir zafer 🏆'];
   function greet() {
     const h = new Date().getHours();
-    return h < 6 ? 'Gece yarısı hesap mı yapıyoruz? 🌙' : h < 11 ? 'Günaydın! ☀️ Kahvaltıdan önce bütçeye bir göz atalım mı?' : h < 17 ? 'Merhaba! Ben Kese.' : h < 22 ? 'İyi akşamlar! Bugün nasıl geçti?' : 'Geç oldu, yarın da buradayım 😴';
+    return h < 6 ? 'İyi geceler 🌙' : h < 11 ? 'Günaydın! ☀️' : h < 17 ? 'Merhaba! Ben Kese.' : h < 22 ? 'İyi akşamlar!' : 'İyi geceler 😴';
   }
   function viewLine(view) {
     const a = app(), s = a && a.snapshot && a.snapshot(); if (!s) return null;
@@ -171,13 +184,42 @@
     const enabled = () => store.get('kese_pet', '1') !== '0';
     function build() {
       if (el) return;
-      el = document.createElement('div'); el.id = 'kese-pet'; el.className = 'pet'; el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0'); el.setAttribute('aria-label', 'Kese ile konuş');
-      el.innerHTML = `<div class="pet-bubble" role="status" aria-live="polite" hidden></div><div class="pet-body">${KESE_SVG}<span class="pet-prop" aria-hidden="true"></span><span class="pet-fx" aria-hidden="true"></span></div><span class="pet-shadow" aria-hidden="true"></span>`;
+      el = document.createElement('div'); el.id = 'kese-pet'; el.className = 'pet';
+      el.innerHTML = `<div class="pet-bubble" role="status" aria-live="polite" hidden></div><button type="button" class="pet-body" aria-label="Kese ile konuş">${KESE_SVG}<span class="pet-prop" aria-hidden="true"></span><span class="pet-fx" aria-hidden="true"></span></button><button type="button" class="pet-play" hidden>Oyna</button><span class="pet-shadow" aria-hidden="true"></span>`;
       document.body.appendChild(el);
       bubble = $('.pet-bubble', el); body = $('.pet-body', el); prop = $('.pet-prop', el);
       x = innerWidth - 84; y = innerHeight - 190; place(true);
       el.addEventListener('pointerdown', onDown);
-      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tap(); } });
+      body.addEventListener('click', (e) => { if (e.detail === 0) tap(); });
+      $('.pet-play', el).onclick = () => {
+        dismissPlay();
+        window.openKeseGames({ mascot: KESE_SVG, play, restoreFocus: () => body.focus({ preventScroll: true }) });
+      };
+      document.addEventListener('focusin', syncQuiet);
+      document.addEventListener('focusout', () => queueMicrotask(syncQuiet));
+      document.addEventListener('visibilitychange', syncQuiet);
+      new MutationObserver(syncQuiet).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
+      document.addEventListener('pointerdown', e => { if (!el.contains(e.target)) dismissPlay(); }, true);
+      el.addEventListener('keydown', e => { if (e.key === 'Escape') { dismissPlay(); body.focus(); } });
+      syncQuiet();
+    }
+    function dismissPlay() {
+      const playButton = el && $('.pet-play', el);
+      if (playButton) playButton.hidden = true;
+    }
+    function formActive() {
+      return document.hidden || !!$('dialog[open]') || document.activeElement?.matches('input, select, textarea, [contenteditable="true"]');
+    }
+    function syncQuiet() {
+      const quiet = formActive();
+      el.classList.toggle('quiet', !!quiet);
+      if (!quiet) return;
+      if (hiding) endHide('lost');
+      clearTimeout(actT); clearTimeout(walkT); clearInterval(stepT);
+      el.classList.remove('walking', 'talking');
+      if (curAct) body.classList.remove(ACTS[curAct].cls);
+      curAct = null; prop.textContent = ''; bubble.hidden = true; dismissPlay();
+      x = innerWidth - 84; y = innerHeight - 190; place(true);
     }
     function place(instant, keepFlip) {
       const W = innerWidth, H = innerHeight; x = Math.max(6, Math.min(W - 70, x)); y = Math.max(70, Math.min(H - 150, y));
@@ -187,7 +229,7 @@
     }
     let mouthT = null;
     function say(text, ms, voice) {
-      if (!el || el.hidden || !text) return;
+      if (!el || el.hidden || formActive() || !text || !$('.pet-play', el).hidden) return;
       bubble.textContent = text; bubble.hidden = false;
       const talkMs = voice ? speak(typeof voice === 'string' ? voice : 'merak') : 0;
       clearTimeout(mouthT);
@@ -196,7 +238,7 @@
       clearTimeout(sayT); sayT = setTimeout(() => { bubble.hidden = true; }, ms || Math.min(7000, 2200 + text.length * 45));
     }
     function act(name, quiet) {
-      const a = ACTS[name]; if (!a || !el || el.hidden) return;
+      const a = ACTS[name]; if (!a || !el || el.hidden || formActive()) return;
       if (curAct) body.classList.remove(ACTS[curAct].cls);
       curAct = name; body.classList.add(a.cls); prop.textContent = a.prop; play(a.sfx);
       if (!quiet && a.says.length && Math.random() < 0.7) say(pick(a.says), null, Math.random() < 0.6);
@@ -220,7 +262,8 @@
     }
     let walkT = null, stepT = null;
     function walkTo(p, cb) {
-      if (!el || dragging || Date.now() < pinnedUntil) { cb && cb(); return; }
+      if (busy()) return;
+      if (Date.now() < pinnedUntil) { cb && cb(); return; }
       const dist = Math.hypot(p.x - x, p.y - y);
       if (dist < 24) { cb && cb(); return; }
       const dur = reduce() ? 0 : Math.max(700, Math.min(3200, dist / 0.14)); // ~140 px/sn
@@ -231,7 +274,7 @@
       x = p.x; y = p.y; place(false, true);
       walkT = setTimeout(() => { clearInterval(stepT); if (!el) return; el.classList.remove('walking'); el.style.transitionDuration = ''; el.classList.toggle('flip', x > innerWidth / 2); cb && cb(); }, dur);
     }
-    function busy() { return !!hiding || !el || el.hidden || document.hidden || dragging || fabOpen || $('dialog[open]') || $('#pet-ask') || document.body.classList.contains('tour-on'); }
+    function busy() { return !!hiding || !el || el.hidden || document.hidden || dragging || fabOpen || formActive() || !$('.pet-play', el).hidden || $('#pet-ask') || document.body.classList.contains('tour-on'); }
     function edgeWalk() {
       const edges = Array.from(document.querySelectorAll('#dock, .welcome-actions .btn, .sumcard, .panel, .tool-card'))
         .map((el) => el.getBoundingClientRect())
@@ -246,8 +289,7 @@
     function wander() {
       if (busy() || reduce() || curAct || el.classList.contains('walking')) return;
       const r = Math.random();
-      if (r < 0.09) hideSeek();
-      else if (r < 0.49) edgeWalk();
+      if (r < 0.49) edgeWalk();
       else if (r < 0.68) {
         walkTo(freeSpot(), () => {
           if (busy()) return;
@@ -286,7 +328,7 @@
       const ts = hideTargets(); if (!ts.length) return;
       const target = pick(ts);
       if (curAct) { body.classList.remove(ACTS[curAct].cls); prop.textContent = ''; curAct = null; }
-      say(pick(['Saklambaç oynayalım! Gözlerini kapat… 3… 2… 1… 🙈', 'Ebe sensin! Ben saklanıyorum, bul beni! 🙈', 'Hadi saklambaç! Saymaya başla, ben kaçtım!']), 2600, true);
+      say(pick(['Saklanıyorum! 🙈', 'Ebe sensin!']), 2600, true);
       play('giggle');
       hiding = { target, fx: Math.random(), found: false, t0: Date.now() };
       setTimeout(() => {
@@ -323,21 +365,24 @@
       body.classList.remove('jump'); void body.offsetWidth; body.classList.add('jump');
       if (why === 'found') {
         play('ding'); const sn = Math.round((Date.now() - h.t0) / 1000);
-        say(pick([`Buldun! 🎉 ${sn} saniyede yakaladın!`, 'Eyvah, yakalandım! 😆', 'Hihi, buldun beni! Bir daha oynayalım mı?']), 3500, true);
+        say(pick([`Buldun! 🎉 ${sn} saniyede yakaladın!`, 'Eyvah, yakalandım! 😆', 'Hihi, buldun beni!']), 3500, true);
         act('dans', true);
       } else if (why === 'timeout') { play('boing'); say(pick(['Ce-eee! Buradaydım! 😜', 'Bulamadın, ben kazandım! 🏆', 'Sobe! Buradaydım işte 😄']), 3500, true); }
       loop();
     }
     function tap() {
+      clearTimeout(walkT); clearInterval(stepT); el.classList.remove('walking'); el.style.transitionDuration = '';
       if (hiding) { endHide('found'); return; }
-      if (Math.random() < 0.12 && !curAct) { hideSeek(); return; }
-      act('sasir', true);
-      const line = Math.random() < 0.4 ? (viewLine(app() && app().view) || pick(TAP_SAYS)) : pick(TAP_SAYS);
-      say(line, null, 'sasir');
+      if (formActive()) return;
+      act('sasir', true); speak('sasir');
+      bubble.hidden = true;
+      const playButton = $('.pet-play', el);
+      playButton.hidden = false; playButton.focus({ preventScroll: true });
     }
     // Sürükle-bırak; kısa dokunuş = konuş
     let sx = 0, sy = 0, ox = 0, oy = 0;
     function onDown(e) {
+      if (!body.contains(e.target) || !e.isPrimary || e.button !== 0) return;
       if (hiding) { e.preventDefault(); endHide('found'); return; }
       dragging = true; moved = false; clearTimeout(walkT); clearInterval(stepT); el.classList.remove('walking'); el.style.transitionDuration = ''; sx = e.clientX; sy = e.clientY; ox = x; oy = y; el.setPointerCapture && el.setPointerCapture(e.pointerId);
       el.addEventListener('pointermove', onMove); el.addEventListener('pointerup', onUp, { once: true }); el.addEventListener('pointercancel', onUp, { once: true });
@@ -346,18 +391,20 @@
       const dx = e.clientX - sx, dy = e.clientY - sy; if (!moved && Math.hypot(dx, dy) < 6) return;
       moved = true; el.classList.add('held'); x = ox + dx; y = oy + dy; place(true);
     }
-    function onUp() {
+    function onUp(e) {
+      el.removeEventListener('pointercancel', onUp); el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointermove', onMove); dragging = false; el.classList.remove('held');
-      if (moved) { pinnedUntil = Date.now() + 8000; loop(); play('pop'); say(pick(['Burası güzelmiş, biraz oturayım.', 'Tamam, buradayım!', 'Wiii! 🎢']), null, true); }
+      if (e.type === 'pointercancel') return;
+      if (moved) { dismissPlay(); pinnedUntil = Date.now() + 8000; loop(); play('pop'); say(pick(['Burası güzelmiş.', 'Tamam, buradayım!', 'Wiii! 🎢']), null, true); }
       else tap();
     }
     return {
       start() {
         if (!enabled()) return; build(); el.hidden = false;
-        setTimeout(() => { act('selam', true); say(greet(), 4500, true); maybeAskMotion(); }, 900);
+        setTimeout(() => { if (busy()) return; act('selam', true); say(greet(), 4500, true); maybeAskMotion(); }, 900);
         loop();
       },
-      stop() { if (el) el.hidden = true; clearTimeout(timer); },
+      stop() { if (hiding) endHide('lost'); if (el) { el.hidden = true; dismissPlay(); } clearTimeout(timer); clearInterval(stepT); clearTimeout(walkT); },
       toggle() { const on = !enabled(); store.set('kese_pet', on ? '1' : '0'); if (on) this.start(); else this.stop(); return on; },
       get on() { return enabled(); },
       onView(view) {
@@ -370,11 +417,11 @@
       },
       react(kind) {
         if (!el || el.hidden) return;
-        if (kind === 'fab') { say(pick(['Ne ekliyoruz? 👀', 'Harcama mı geldi yine? 😅', 'Hadi bakalım!']), 2400, true); play('pop'); }
+        if (kind === 'fab') { say(pick(['Ne ekliyoruz? 👀', 'Buradayım!', 'Hadi bakalım!']), 2400, true); play('pop'); }
       },
       hideSeek() { hideSeek(); },
       hideForTour(on) { if (el) el.classList.toggle('away', !!on); },
-      cheer() { if (!el || el.hidden) return; act('neseli', true); say('Yuppi!', 1900); yuppi(); },
+      cheer() { if (!el || el.hidden || formActive()) return; act('neseli', true); say('Yuppi!', 1900); yuppi(); },
     };
   })();
   window.KesePet = pet;
@@ -421,6 +468,6 @@
     if (nx !== '0') speak('merak');
   });
   window.KeseVoiceLabel = () => `Kese'nin sesi: ${VOICE_LBL[voiceMode()]}`;
-  const boot = () => { buildFab(); pet.start(); };
+  const boot = () => { pet.start(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();

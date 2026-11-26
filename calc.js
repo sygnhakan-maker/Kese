@@ -1791,6 +1791,16 @@
     return m;
   }
 
+  function recordedSpend(db, from, through) {
+    const inPeriod = (entry) => entry.tarih >= from && entry.tarih <= through;
+    const cardSpend = sum(db.kredi_kartlari || [], (card) => sum((card.hareketler || []).filter((entry) =>
+      inPeriod(entry) && ['Tek Çekim Harcama', 'Taksitli Alışveriş'].includes(entry.tur)
+      && !(entry.aciklama === 'Mevcut kart borcu')), (entry) => Number(entry.ana_para) || 0));
+    const accountSpend = sum(db.kmh_hesaplar || [], (account) => sum((account.islemler || []).filter((entry) =>
+      inPeriod(entry) && entry.yon === 'cikis'), (entry) => Number(entry.tutar) || 0));
+    return r2(cardSpend + accountSpend);
+  }
+
   // Varsayılan ad başka kayıtta varsa "Ad 2", "Ad 3" ... ile ayırt eder (büyük/küçük harf ve boşluk fark etmez).
   function uniqueName(base, existing) {
     const norm = (x) => String(x == null ? '' : x).trim().toLocaleLowerCase('tr');
@@ -1802,7 +1812,7 @@
   }
 
   return {
-    uniqueName, installmentBalance, monthCash, loanPlan, cardStatementDue, cardPayPreview, payCardStatement, undoCardPayment, hesapBakiye, hesapKullanilan, hesapAylikFaiz, hesapIslem, hesapIslemSil, cardStatementOf, cardStatement, cardUsed, monthView, lastPlanYm, giderAktif, giderTutar, AYLAR, r2, sum, ymOf, isoOf, ymAdd, monthsBetween, fmtYM, fmtDate, fmtMoney, daysInMonth, dueDate,
+    recordedSpend, uniqueName, installmentBalance, monthCash, loanPlan, cardStatementDue, cardPayPreview, payCardStatement, undoCardPayment, hesapBakiye, hesapKullanilan, hesapAylikFaiz, hesapIslem, hesapIslemSil, cardStatementOf, cardStatement, cardUsed, monthView, lastPlanYm, giderAktif, giderTutar, AYLAR, r2, sum, ymOf, isoOf, ymAdd, monthsBetween, fmtYM, fmtDate, fmtMoney, daysInMonth, dueDate,
     monthlyRate, vergiFor, annuityPayment, annuityTotal, annuityPrincipal, impliedRate, installmentCount, deriveLoan, checkLoan, buildSchedule,
     cardFirstYm, kmhFirstYm, loanFirstYm, installmentStatus, items, unpaid, remainingTotal, remainingPrincipal,
     summarize, minPaymentRate, cardStatementDebt, cardMinPayment, minPaymentTrap,

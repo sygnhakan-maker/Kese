@@ -1,0 +1,19 @@
+button.pet-body { display: block; border: 0; background: transparent; padding: 0; color: inherit; touch-action: none; cursor: inherit; }
+.pet-play { position: absolute; bottom: 70px; right: 0; width: max-content; min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); font: inherit; font-weight: 650; cursor: pointer; box-shadow: 0 5px 18px #0002; }
+.pet:not(.flip) .pet-play { right: auto; left: 0; }
+.pet.quiet { visibility: hidden; }
+.pet-games { width: min(350px, calc(100vw - 24px)); }
+.pet-games header { display: flex; align-items: center; justify-content: space-between; }
+.pet-games .game-body { display: grid; gap: 12px; padding: 18px; }
+.pet-games .game-back { justify-self: start; }
+.pet-games .game-choices { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
+.pet-games .game-choices button { min-width: 0; padding-inline: 4px; }
+.pet-games .game-choices button:disabled { opacity: .85; }
+.pet-games .game-choices .lit { background: var(--text); color: var(--panel); outline: 2px solid var(--text); }
+.pet-games .game-status { margin: 0; text-align: center; }
+.pet-games .game-hand { justify-self: center; border: none; background: none; padding: 0; }
+.game-hand svg { width: 112px; height: 128px; overflow: visible; }
+.game-hand .k-arm-r { transform-box: view-box; transform-origin: 96px 80px; transform: rotate(-100deg); }
+.game-hand.clap .k-arm-r { animation: kese-clap .55s ease-out; }
+@keyframes kese-clap { 40% { transform: translate(6px,-6px) rotate(-145deg); } }
+@media (prefers-reduced-motion: reduce) { html:not(.motion-ok) .game-hand.clap .k-arm-r { animation: none; } }

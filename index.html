@@ -22,16 +22,18 @@
   <link rel="stylesheet" href="ui-forms.css">
   <link rel="stylesheet" href="ui-panels.css">
   <link rel="stylesheet" href="ui-fix.css">
+  <link rel="stylesheet" href="pet-games.css">
 </head>
 <body>
   <a class="skip" href="#main">İçeriğe geç</a>
   <header class="topbar mobtop" aria-label="Üst çubuk">
-    <span class="tb-brand"><img class="tb-mascot" src="icons/mascot-96.png" alt="" width="32" height="32" decoding="async"><span class="tb-name">Kese</span></span>
+    <button type="button" class="tb-brand" data-nav="ozet" aria-label="Kese ana sayfa"><img class="tb-mascot" src="icons/mascot-96.png" alt="" width="32" height="32" decoding="async"><span class="tb-name">Kese</span></button>
     <span class="tb-actions mt-actions">
       <button type="button" id="sim-toggle" class="mt-btn" data-act="sbx-toggle" hidden aria-label="Simülasyon modunu aç veya kapat" title="Simülasyon"><i data-ic="flask"></i></button>
       <button type="button" id="sync-chip" class="mt-btn" data-act="auth-open" hidden aria-label="Hesap ve eşitleme" title="Hesap ve eşitleme"><i data-ic="upload"></i></button>
       <button type="button" id="ai-open" class="mt-btn ai-btn" data-act="ai-open" aria-label="Kese Asistan'ı aç" title="Kese Asistan (Yapay Zeka)"><i data-ic="spark"></i><span class="ai-btn-lbl">Asistan</span></button>
       <button type="button" id="ses-toggle" class="mt-btn on" data-act="ses-toggle" aria-label="Ses efektleri" aria-pressed="true" title="Ses"><i data-ic="vol"></i></button>
+      <button type="button" class="mt-btn" data-nav="ayarlar" aria-label="Ayarlar" title="Ayarlar"><i data-ic="gear"></i></button>
     </span>
   </header>
   <div class="app">
@@ -43,13 +45,38 @@
     </main>
     <aside id="simpanel" class="simpanel" aria-label="Simülasyon raporu" hidden></aside>
   </div>
-  <!-- Otomatik gizlenen yüzen menü -->
+  <!-- Ana menü -->
   <nav id="dock" class="dock" aria-label="Ana menü">
     <div id="nav" class="dock-items"></div>
     <span class="dock-sep" aria-hidden="true"></span>
-    <button type="button" class="dock-add" id="fab-btn" data-act="fab-toggle" aria-label="Ekle" title="Ekle" aria-expanded="false" aria-controls="fab"><i data-ic="plus"></i></button>
+    <button type="button" class="dock-add" id="fab-btn" data-act="fab-toggle" aria-label="Menüyü aç" title="Menü" aria-expanded="false" aria-controls="fab"><i data-ic="plus"></i></button>
   </nav>
-  <button id="dock-handle" class="dock-handle" type="button" aria-controls="dock" aria-label="Menüyü göster" aria-expanded="false"><span></span></button>
+  <div id="fab-bd" class="fab-bd" hidden></div>
+  <section id="fab" aria-label="Kese menüsü" hidden>
+    <div data-menu-page="main">
+      <nav class="fab-destinations" aria-label="Sayfalar">
+        <button type="button" data-nav="ozet"><i data-ic="home"></i>Ödeme planım</button>
+        <button type="button" data-nav="borclar"><i data-ic="card"></i>Hesaplarım</button>
+        <button type="button" data-nav="butce"><i data-ic="wallet"></i>Bütçem</button>
+      </nav>
+      <div class="fab-actions">
+        <button type="button" data-wzgo="harcama"><i data-ic="plus"></i>Harcama</button>
+        <button type="button" data-menu-target="deposit"><i data-ic="wallet"></i>Para girişi</button>
+        <button type="button" data-menu-target="debt"><i data-ic="bank"></i>Borç ekle</button>
+        <button type="button" data-menu-target="account"><i data-ic="card"></i>Kart/hesap ekle</button>
+      </div>
+    </div>
+    <div data-menu-page="deposit" hidden><h2>Para girişi</h2><div id="deposit-accounts"></div></div>
+    <div data-menu-page="debt" hidden><h2>Borç ekle</h2>
+      <button type="button" data-wzgo="kalan">Banka kredisi / kredili ürün</button>
+      <button type="button" data-wzgo="elden">Elden borç</button>
+    </div>
+    <div data-menu-page="account" hidden><h2>Kart/hesap ekle</h2>
+      <button type="button" data-wzgo="kart">Kredi kartı</button>
+      <button type="button" data-wzgo="hesapv">Vadesiz hesap / artı para</button>
+    </div>
+    <button type="button" data-menu-back hidden>‹ Geri</button>
+  </section>
   <button id="simtab" class="simtab" type="button" data-act="sbx-panel" hidden aria-label="Sağ paneli aç veya kapat"><i data-ic="flask"></i> <span id="simtab-l">Plan</span> <span id="simtab-n" class="badge"></span></button>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
@@ -284,8 +311,10 @@
 <script src="import.js"></script>
   <script src="live.js"></script>
   <script src="ai.js"></script>
+  <script src="push-client.js"></script>
   <script src="app.js"></script>
   <script src="dock.js"></script>
+  <script src="pet-games.js"></script>
   <script src="kese-pet.js"></script>
 </body>
 </html>

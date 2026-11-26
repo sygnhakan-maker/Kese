@@ -65,8 +65,7 @@
   let db = null;
   let rates = null; // {durum, oranlar, cekildi, hata}
   const VALID_VIEWS = ['ozet', 'borclar', 'takvim', 'dahafazla', 'butce', 'maliyet', 'ayarlar', 'pano', 'oneriler'];
-  const ui = { view: 'ozet', tab: 'KART', debtFilter: 'ALL', todayExpanded: false, selKmh: null, selKart: null, open: null, picked: new Set(), ym: null, calPage: 0, calOpen: {}, sbxPanel: true, panelNormal: false,
-    gl: { id: 0, aciklama: '', tutar: '', baslangic: '', sure: '' }, gf: { kategori: 'Kira', ad: '', tutar: '', gun: '', kalan: '', sure: '', id: 0, baslangic: '' } };
+  const ui = { view: 'ozet', tab: 'KART', debtFilter: 'ALL', todayExpanded: false, selKmh: null, selKart: null, open: null, picked: new Set(), ym: null, calPage: 0, calOpen: {}, sbxPanel: true, panelNormal: false };
   let lastSnap = null;
   let lastPayOrigin = null;
   // Simülasyon modu: db geçici bir kopyaya çevrilir, hiçbir şey sunucuya yazılmaz.
@@ -144,6 +143,7 @@
     try {
       await KeseStore.save(db);
       saved = true;
+      window.KesePush?.changed();
       if (typeof syncApi !== 'undefined' && syncApi) syncApi.markDirty();
       if (msg) toast(msg, Object.assign({ quiet: !!payment }, undoSnap ? { undo: undoSnap } : {}));
     } catch (e) {
@@ -319,6 +319,13 @@
       ['takvim', 'Takvimim', sum.gecikmis > 0 ? '!' : ''],
       ['dahafazla', 'Araçlar', ''],
     ];
+    document.querySelectorAll('#fab [data-nav], .topbar [data-nav]').forEach((button) => {
+      if (button.dataset.nav === ui.view) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+    $('deposit-accounts').innerHTML = db.kmh_hesaplar.map((account) =>
+      `<button type="button" data-act="hesap-giris" data-id="${esc(account.id)}">${esc([account.banka, account.hesap_adi].filter(Boolean).join(' · '))}</button>`
+    ).join('') || '<p>Para girişini kaydetmek için önce vadesiz hesabını ekle.</p><button type="button" data-wzgo="hesapv">Vadesiz hesap ekle</button>';
     $('nav').innerHTML = items.map(([k, l, b]) =>
       `<button type="button" data-nav="${k}" title="${{ borclar: 'Hesaplarım', takvim: 'Ödeme takvimim' }[k] || l}" ${active === k ? 'aria-current="page"' : ''}>${icon(NAVIC[k])}<span class="dl">${l}</span>${b ? `<span class="badge" aria-label="Geciken ödeme var">${b}</span>` : ''}</button>`).join('');
   }
@@ -359,82 +366,123 @@
   const personalDebts = (d) => (d.sabit_giderler || []).filter((g) => g.kategori === 'Elden borç' && g.kalan != null && g.kalan !== '');
   const hasDebt = (d) => C.items(d).length > 0 || personalDebts(d).length > 0;
   const debtName = (u) => (u.banka && u.banka !== 'Diğer' ? `${u.banka} · ${u.aciklama}` : u.aciklama);
-  function closingThisMonthInfo(d, at) {
-    if (typeof C.closingThisMonth === 'function') {
-      const res = C.closingThisMonth(d, at);
-      if (res) {
-        const list = Array.isArray(res) ? res : (res.items || res.list || []);
-        const openCount = list.filter((x) => !x.odendi).length;
-        const count = openCount > 0 ? openCount : (typeof res.totalCount === 'number' ? res.totalCount : list.length);
-        const relief = typeof res.aylikRahatlama === 'number' ? res.aylikRahatlama : (typeof res.relief === 'number' ? res.relief : C.sum(list, (x) => Number(x.aylik || x.tutar || 0)));
-        return { count, relief: C.r2(relief) };
+  // Kart ödemesinin kayıt tarihi vade ayından farklı olabilir. Ekstre kaydı ve
+  // işaretlediği taksit aynı ödemedir. Eski kayıtlarda taksit tek kaynak olabilir.
+  function homePaid(sum, fixed) {
+    let paid = sum.buAyOdenen + fixed.toplam - fixed.odenmemis;
+    for (const card of db.kredi_kartlari) {
+      const payments = card.ekstre_odemeleri || [];
+      if (!payments.length) continue;
+      const moved = new Map();
+      let unlinked = 0;
+      for (const p of payments) {
+        if ((p.tarih || p.ym || '').slice(0, 7) === sum.thisYm) paid += Number(p.tutar) || 0;
+        let allocated = 0;
+        for (const r of p.refs || []) {
+          const item = (card.hareketler || []).find((h) => h.id === r.hid);
+          const t = item && (item.taksitler || []).find((x) => x.no === r.no);
+          if (!t || t.kapatildi) continue;
+          const amount = r.tutar == null ? t.tutar : Number(r.tutar);
+          allocated += amount;
+          if (t.ym === sum.thisYm) moved.set(t, r.tutar == null ? t.tutar : (moved.get(t) || 0) + amount);
+        }
+        if (!allocated && p.ym === sum.thisYm) unlinked += Number(p.tutar) || 0;
       }
+      let legacyPaid = 0;
+      for (const h of card.hareketler || []) {
+        for (const t of h.taksitler || []) {
+          if (t.kapatildi || t.ym !== sum.thisYm || (h.gecikmis && h.odemeler?.length)) continue;
+          const marked = t.tutar - C.installmentBalance(t);
+          const linked = Math.min(marked, moved.get(t) || 0);
+          paid -= linked;
+          legacyPaid += marked - linked;
+        }
+      }
+      paid -= Math.min(unlinked, legacyPaid);
     }
-    const thisYm = C.ymOf(at);
-    let count = 0, relief = 0;
-    C.items(d).forEach((e) => {
-      const un = C.unpaid(e.item);
-      if (un.length > 0 && un.every((t) => t.ym <= thisYm)) {
-        count++;
-        relief += Number(un[un.length - 1].tutar) || 0;
-      }
-    });
-    personalDebts(d).forEach((g) => {
-      const rem = Number(g.kalan) || 0;
-      if (rem > 0.01 && rem <= (Number(g.tutar) || 0) + 0.01 && !(g.odendi_aylar || []).includes(thisYm)) {
-        count++;
-        relief += Math.min(rem, Number(g.tutar) || rem);
-      }
-    });
-    return { count, relief: C.r2(relief) };
+    return C.r2(paid);
   }
+
+  function homeEndings(thisYm) {
+    const endings = [];
+    for (const e of C.items(db)) {
+      const terms = (e.item.taksitler || []).filter((t) => !t.kapatildi);
+      if (!(e.item.toplam_taksit > 1 || terms.length > 1)) continue;
+      const last = terms.reduce((latest, t) => (!latest || t.ym > latest.ym ? t : latest), null);
+      if (!last || last.ym < thisYm) continue;
+      endings.push({ ym: last.ym, name: e.item.kredi_adi || e.item.aciklama || e.hesap, amount: last.sigortaOder ? 0 : last.tutar });
+    }
+    for (const g of personalDebts(db)) {
+      const amount = Number(g.tutar), rem = Number(g.kalan);
+      if (!(amount > 0)) continue;
+      const paid = new Set(g.odendi_aylar || []);
+      let ym = g.baslangic_ym > thisYm ? g.baslangic_ym : thisYm;
+      if (rem > 0.005) {
+        const count = Math.ceil((rem - 0.005) / amount);
+        let end = C.ymAdd(ym, count - 1);
+        for (const month of [...paid].sort()) {
+          if (month >= ym && month <= end) end = C.ymAdd(end, 1);
+        }
+        endings.push({ ym: end, name: g.ad, amount: C.r2(rem - (count - 1) * amount) });
+      } else if (paid.has(thisYm)) endings.push({ ym: thisYm, name: g.ad, amount: C.giderTutar(g, thisYm) });
+    }
+    return endings.sort((a, b) => a.ym.localeCompare(b.ym));
+  }
+
   function viewHome(sum) {
-    const accN = db.kredi_kartlari.length + db.kmh_hesaplar.length;
-    if (!hasDebt(db) && !accN && !db.ek_gelirler.length) return welcomeHtml();
-    const firstCard = db.kredi_kartlari.length === 1 && !(db.kredi_kartlari[0].hareketler || []).length ? db.kredi_kartlari[0] : null;
-    const firstActions = firstCard && !ui.ym ? `<section class="panel first-card-actions"><h2>${esc(firstCard.kart_adi)} hazır</h2>
+    const at = now(), ym = sum.thisYm, today = C.isoOf(at);
+    const heading = pageHead('Ödeme planım', C.fmtYM(ym));
+    const fixed = C.fixedSummary(db, at);
+    const empty = !hasDebt(db) && !db.kredi_kartlari.length && !db.kmh_hesaplar.length && !db.sabit_giderler.length && !(db.tek_seferlik || []).length && !db.ek_gelirler.length;
+    if (empty) return heading + welcomeHtml();
+    const firstCard = db.kredi_kartlari.length === 1 && !db.kredi_kartlari[0].hareketler?.length ? db.kredi_kartlari[0] : null;
+    const firstActions = firstCard ? `<section class="panel first-card-actions"><h2>${esc(firstCard.kart_adi)} hazır</h2>
       <div class="welcome-actions"><button type="button" class="btn primary" data-act="first-spend" data-id="${firstCard.id}">İlk harcamamı ekle</button>
       <button type="button" class="btn" data-act="opening-statement" data-id="${firstCard.id}">Mevcut ekstre borcumu gir</button></div></section>` : '';
-    const curNow = now(), todayIso = C.isoOf(curNow);
-    const homeHead = `<div class="homehead"><div><span class="muted">${C.fmtDate(todayIso)}</span><h1>Bugün</h1></div></div>`;
-    // Sıradaki ödeme (kart taksitleri ekstre olarak toplanır)
-    const personal = C.fixedSummary(db, curNow).list.filter((g) => g.kategori === 'Elden borç' && g.kalan != null && !g.odendi && (Number(g.kalan) || 0) > 0.01)
-      .map((g) => ({ tutar: Math.min(Number(g.tutar) || 0, Number(g.kalan) || Number(g.tutar) || 0), vade: g.vade, ym: sum.thisYm, durum: g.gecti ? 'gecikmis' : 'bu_ay', aciklama: g.ad, personalId: g.id }));
-    const due = groupCardRows(sum.upcoming.filter((u) => u.durum !== 'sigorta'), 'parentId').concat(personal)
-      .filter((u) => u.durum !== 'odendi').sort((a, b) => (a.durum === 'gecikmis' ? 0 : 1) - (b.durum === 'gecikmis' ? 0 : 1) || a.vade.localeCompare(b.vade));
-    const next = due[0] || null;
-    const daysTo = (v) => Math.round((new Date(v + 'T00:00:00') - new Date(todayIso + 'T00:00:00')) / 864e5);
-    const nextAct = (u) => {
-      if (ui.ym || !u) return '';
-      if (u.stmt) return `<button type="button" class="btn sm primary" data-act="pay-stmt" data-id="${u.kartId}" data-ym="${u.ym}">Ödemeyi kaydet</button>`;
-      if (u.personalId != null) return `<button type="button" class="btn sm primary" data-act="pay-elden" data-id="${u.personalId}">Ödedim</button>`;
-      return `<button type="button" class="btn sm primary" data-act="pay" data-cat="${u.cat}" data-pid="${u.parentId ?? 0}" data-iid="${u.itemId}" data-no="${u.taksitNo}">Ödedim</button>`;
-    };
-    const cards = [];
-    if (next) {
-      const late = next.durum === 'gecikmis' || daysTo(next.vade) < 0, dd = daysTo(next.vade);
-      cards.push(`<section class="sumcard${late ? ' bad' : ''}"><span class="sc-k">${late ? 'Gecikmiş ödeme' : 'Sıradaki ödeme'}</span><b class="sc-v">${M(next.tutar)}</b>
-        <small>${esc(debtName(next))} · ${C.fmtDate(next.vade)}${late ? '' : dd === 0 ? ' · <b>bugün</b>' : ` · ${dd} gün sonra`}</small><div class="sc-act">${nextAct(next)}</div></section>`);
+    const due = groupCardRows(sum.upcoming.filter((r) => r.durum !== 'sigorta' && r.tutar > 0), 'parentId');
+    const fixedDue = fixed.list.filter((g) => !g.odendi && g.gun > 0 && g.tutar > 0)
+      .map((g) => ({ vade: g.vade, aciklama: g.ad, tutar: g.tutar, gider: g }));
+    for (const g of db.sabit_giderler) {
+      if (!(g.gun > 0) || fixedDue.some((r) => r.gider.id === g.id)) continue;
+      let month = g.baslangic_ym > ym ? g.baslangic_ym : C.ymAdd(ym, 1);
+      const paidMonths = new Set(g.odendi_aylar || []);
+      while (paidMonths.has(month)) month = C.ymAdd(month, 1);
+      if (C.giderAktif(g, month) && C.giderTutar(g, month) > 0) {
+        fixedDue.push({ vade: C.dueDate(month, g.gun), aciklama: g.ad, tutar: C.giderTutar(g, month), gider: g, future: true });
+      }
     }
-    const personalRemaining = C.sum(personalDebts(db), (g) => Math.max(0, Number(g.kalan) || 0));
-    const debtTotal = C.r2(sum.kalanBorc + personalRemaining + C.sum(db.kmh_hesaplar, (a) => Math.max(0, -C.hesapBakiye(a))));
-    if (debtTotal > 0.5) cards.push(`<section class="sumcard"><span class="sc-k">Toplam borcun</span><b class="sc-v">${M(debtTotal)}</b><small>${sum.sonVade ? `Ödemeleri düzenli yaparsan ${C.fmtYM(sum.sonVade.slice(0, 7))}'de biter` : 'Taksitli borcun yok'}</small></section>`);
-    const closing = closingThisMonthInfo(db, curNow);
-    if (closing.count > 0) cards.push(`<section class="sumcard win"><span class="sc-k">Bu ay biten</span><b class="sc-v">${closing.count} borç 🎉</b><small>Gelecek ay ödemelerin <b>${M(closing.relief)}</b> azalıyor</small></section>`);
-    // Tek bir kısa ipucu
-    let tip = '';
-    const hot = db.kredi_kartlari.map((k) => ({ k, p: k.limit > 0 ? C.cardUsed(k) / k.limit : 0 })).sort((a, b) => b.p - a.p)[0];
-    const eksi = db.kmh_hesaplar.filter((a) => C.hesapBakiye(a) < 0);
-    const mv = C.monthView(db, new Date(), C.ymOf(new Date()), S());
-    if (sum.gecikmis > 0.5) tip = `Gecikmiş ödemelerin (${M(sum.gecikmis)}) her gün faiz biriktiriyor; önce bunları kapat.`;
-    else if (!db.ek_gelirler.length) tip = 'Gelirini eklersen her ay ödemelerden sonra elinde ne kalacağını gösteririm (Araçlar → Gelir ve giderler).';
-    else if (mv.kalan < -0.5) tip = `Bu ay ödemelerin gelirini ${M(-mv.kalan)} aşıyor. Asgari ödeme yerine faizi en yüksek borcu kapatmayı düşün.`;
-    else if (eksi.length) tip = `Artı paradan kullandığın tutar ayda yaklaşık ${M(C.sum(eksi, (a) => C.hesapAylikFaiz(a, S())))} faiz ve vergi doğuruyor; para girdikçe önce bunu kapat.`;
-    else if (hot && hot.p > 0.8) tip = `${esc(hot.k.kart_adi)} kartının limitinin %${Math.round(hot.p * 100)}'i dolu; yeni taksitli harcama yaparken dikkat.`;
-    else if (mv.kalan > 0.5) tip = `Bu ay ödemelerden sonra ${M(mv.kalan)} kalıyor. Bir kısmını birikime ayırmak ya da yüksek faizli borca yatırmak iyi olur.`;
-    if (tip) cards.push(`<section class="sumcard tip"><span class="sc-k">${icon('spark')} İpucu</span><p>${tip}</p></section>`);
-    if (!next && !debtTotal) cards.push(`<section class="sumcard"><span class="sc-k">Durum</span><b class="sc-v">Borcun yok 🎉</b><small>Harcama, kart veya kredi eklemek için alttaki + düğmesine dokun.</small></section>`);
-    return `<div class="home">${homeHead}${firstActions}<div class="sumcards">${cards.join('')}</div>${monthCardHtml()}</div>`;
+    const next = due.concat(fixedDue).sort((a, b) => a.vade.localeCompare(b.vade))[0];
+    const nextAction = !next || next.future ? '' : next.gider
+      ? `<button type="button" class="btn sm" data-act="${next.gider.kategori === 'Elden borç' ? 'pay-elden' : 'pay-gider'}" data-id="${next.gider.id}">Ödedim</button>`
+      : payBtn(next);
+    const remaining = C.r2(sum.buAy + fixed.odenmemis + sum.kmhFaiz + sum.tekSeferlik);
+    const covered = (month) => C.sum(C.items(db), (e) => C.sum((e.item.taksitler || []).filter((t) => t.ym === month && t.sigortaOder && !t.kapatildi), C.installmentBalance));
+    const endings = homeEndings(ym);
+    const line = (label, value) => `<div class="plan-line"><span>${esc(label)}</span><strong>${M(value)}</strong></div>`;
+    const monthRow = (month) => {
+      const vm = C.monthView(db, at, month, S());
+      const bills = due.filter((r) => r.ym === month);
+      const expenses = C.r2(vm.gider - vm.giderOdenen);
+      const insurance = covered(month);
+      const total = C.r2(C.sum(bills, (r) => r.tutar) + expenses + vm.tek + vm.faiz);
+      const details = bills.map((r) => line(debtName(r), r.tutar));
+      if (expenses > 0) details.push(line('Giderler ve elden borçlar', expenses));
+      if (vm.tek > 0) details.push(line('Tek seferlik ödemeler', vm.tek));
+      if (vm.faiz > 0) details.push(line('Tahmini artı para faizi', vm.faiz));
+      if (insurance > 0) details.push(line('Sigortanın karşılayacağı', insurance));
+      return `<details class="plan-month"><summary><span>${C.fmtYM(month)}</span><b>${M(total)}</b></summary><div class="plan-breakdown">${details.join('') || 'Kayıtlı ödeme yok.'}</div></details>`;
+    };
+    return `<div class="home plan-home">${heading}${firstActions}
+      <section class="panel plan-current"><div class="plan-hero"><h2>Bu ay cebimden çıkacak kalan</h2><strong>${M(remaining)}</strong>
+        ${sum.gecikmis > 0 ? `<small>Gecikmiş ${M(sum.gecikmis)} dahil</small>` : ''}</div>
+        <div class="plan-stats"><div><span>Bu ay ödenen</span><b>${M(homePaid(sum, fixed))}</b></div><div><span>Sigortanın karşılayacağı</span><b>${M(covered(ym))}</b></div></div>
+      </section>
+      <section class="panel plan-next"><div><h2>Sıradaki ödeme</h2>${next ? `<strong>${esc(debtName(next))}</strong><small>${C.fmtDate(next.vade)}${next.vade < today ? ' · Gecikmiş' : next.vade === today ? ' · Bugün' : ''}</small>` : '<p>Vadesi belirlenmiş bekleyen ödeme yok.</p>'}</div>
+        ${next ? `<div class="plan-next-amount"><b>${M(next.tutar)}</b><div>${nextAction}</div></div>` : ''}</section>
+      <section class="panel plan-upcoming"><header><h2>Gelecek aylar</h2><button class="btn sm" data-nav="takvim">Ödeme takvimim</button></header>
+        ${[1, 2, 3].map((i) => monthRow(C.ymAdd(ym, i))).join('')}</section>
+      <section class="panel plan-endings"><header><h2>Taksitlerim ne zaman bitiyor?</h2></header>${endings.length ? endings.map((e) => `<div class="plan-line"><span><b>${esc(e.name)}</b><small>Son taksit · ${C.fmtYM(e.ym)}</small></span><span>${e.amount > 0 ? `Sonraki aydan itibaren<br><b>ayda ${M(e.amount)} daha az</b>` : 'Son taksiti sigorta karşılıyor'}</span></div>`).join('') : '<p>Planında bitiş tarihi olan taksitli borç yok.</p>'}</section>
+      <div class="plan-links"><button class="btn" data-nav="borclar">${icon('card')} Hesaplarım</button><details class="plan-budget"${document.querySelector('.plan-budget[open]') ? ' open' : ''}><summary>Gelir, gider ve limitlerim</summary>${monthCardHtml()}</details></div></div>`;
   }
 
   /** Ana ekran ay kartı: o ayın ödemeleri, ödemelerden sonra kalan para ve limitler. Oklarla geçmiş/gelecek aylar. */
@@ -502,10 +550,11 @@
   function welcomeHtml() {
     return `<div class="welcome wl">
       <img class="welcome-mascot" src="icons/mascot-400.png" alt="" width="160" height="183" decoding="async">
-      <h1>İlk kartını takip etmeye başla</h1>
-      <p class="lead">Bir kart ve bir alışveriş ekle. Ne zaman, ne kadar ödeyeceğini birlikte görelim.</p>
+      <h2>Ödeme planını oluşturmaya başla</h2>
+      <p class="lead">Kartını veya kredini eklediğinde ilk ödeme tarihini ve aylık tutarlarını burada göreceksin.</p>
       <div class="welcome-actions">
         <button type="button" class="btn primary" id="tw-kart" data-act="add-hesap" data-cat="KART">İlk kartımı ekle</button>
+        <button type="button" class="btn" data-act="add-kredi">Kredi ekle</button>
         <button type="button" class="btn" id="tw-demo" data-act="demo-card">Örnek kartla dene</button>
       </div>
       <button type="button" class="btn ghost" data-act="tour">${icon('spark')} Kısa tanıtımı izle</button>
@@ -518,13 +567,12 @@
     { sel: '#tw-demo', t: 'Örnek kartla gerçek bilgilerini girmeden deneyebilirsin.' },
   ];
   const TOUR_HOME = [
-    { sel: '.mcard-home .mh-grid', t: 'Merhaba, ben Kese! 👋 Burada bu ayın ödemeleri toplamı (kredi taksitleri, kart ekstreleri, giderler, artı para faizi) ve ödemelerden sonra elinde kalacak para var.' },
-    { sel: '.mcard-home .mh-nav', t: 'Oklarla önceki ve sonraki aylara geç. Gelecek aylarda "ödemeleri eksiksiz yaparsan" ne kalacağını görürsün; ok, son taksidinin ayına kadar gider.' },
-    { sel: '.mcard-home .mh-limit', t: 'Kart limitlerinin ve artı para limitlerinin toplamı, ne kadarını kullandığın ve kullanılabilir kısmı.' },
-    { sel: '.sumcards', t: 'Altta kısa özetler: sıradaki ödemen, toplam borcun ve ne zaman biteceği, bu ay biten borçlar ve sana bir ipucu.' },
-    { sel: '.dock-add', t: 'Her şeyi bu + düğmesinden eklersin: harcama, kredi kartı, hesap ve kredili ürün. Kart ödemesini kartın kutusundaki "Yaptığım ödemeyi kaydet" ile girersin: tamamı, asgari ya da istediğin tutar.' },
-    { sel: '#nav [data-nav="borclar"]', t: 'Hesaplarım: kartların (ekstre, son ödeme, asgari, limit), vadesiz hesapların (bakiye, artı para) ve kredilerin.' },
-    { sel: '#nav [data-nav="takvim"]', t: 'Ödeme takvimim: her ay ne kadar ödediğin, hangi borcun hangi ay bittiği ve ödemelerden sonra elinde ne kaldığı. Bu tanıtımı Araçlar\'dan tekrar izleyebilirsin.' },
+    { sel: '.plan-current', t: 'Bu ay cebinden çıkacak kalan tutarı, ödediklerini ve sigortanın karşılayacağı taksitleri burada görebilirsin.' },
+    { sel: '.plan-next', t: 'Sıradaki ödemenin tarihi ve tutarı burada. Ödemeni yaptığında kaydedebilirsin.' },
+    { sel: '.plan-upcoming', t: 'Bir ayı açarak o ay ödenecek tutarın ayrıntılarını görebilirsin.' },
+    { sel: '.plan-endings', t: 'Son taksitin tarihini ve sonraki ay ödemelerinin ne kadar azalacağını burada görebilirsin.' },
+    { sel: '.dock-add', t: '+ düğmesinden ödeme planına, hesaplarına ve bütçene ulaşabilir, harcama, para girişi veya borç ekleyebilirsin.' },
+    { sel: '.topbar [data-nav="ayarlar"]', t: 'Ayarlar bölümünden yedeklerine ve tüm araçlara ulaşabilirsin.' },
   ];
   let TOUR = TOUR_WELCOME, tourSeenMem = false;
   const TOUR_KEY = 'kese_tour_v3';
@@ -662,7 +710,7 @@
 
   // ---------- Gelir & Gider ----------
   function viewButce() {
-    const F = C.fixedSummary(db, now()), ym = C.ymOf(now()), g = ui.gf, elden = g.kategori === 'Elden borç';
+    const F = C.fixedSummary(db, now()), ym = C.ymOf(now());
     const curYm0 = C.ymOf(now());
     const readOnly = !!ui.ym;
     const expenseAmounts = new Map(F.list.map((item) => [item.id, item.tutar]));
@@ -673,35 +721,28 @@
         <div class="grow"><b>${icon(C.giderIkon(x.kategori))} ${esc(x.ad)}</b><small>${esc(x.kategori)}${x.gun ? ` · her ayın ${x.gun}. günü` : ''}${x.kalan != null && x.kalan !== '' ? ` · kalan borç ${M(x.kalan)}` : ''}${x.sure > 0 ? ` · ${x.sure} taksit` : ''}${aktif ? '' : (x.baslangic_ym && x.baslangic_ym > curYm0 ? ' · henüz başlamadı' : ' · bitti')}${x.baslangic_ym && x.baslangic_ym > curYm0 ? ` · ${C.fmtYM(x.baslangic_ym)}'den itibaren` : ''}</small></div>
         <span class="amt bad-t">−${M(expenseAmounts.get(x.id) ?? x.tutar)}</span>${readOnly ? '' : `<button class="btn sm" data-act="gider-edit" data-id="${x.id}">Düzenle</button><button class="btn sm danger" data-act="gider-del" data-id="${x.id}" aria-label="Sil">${icon('x')}</button>`}</li>`;
     }).join('');
-    const catMax = Math.max(1, ...F.kategoriler.map((k) => k.tutar));
-    const presets = [['Kira', 'Kira'], ['Elektrik', 'Fatura'], ['Su', 'Fatura'], ['Doğalgaz', 'Fatura'], ['İnternet', 'Fatura'], ['Telefon', 'Fatura'], ['Market', 'Market / Gıda'], ['Ulaşım', 'Ulaşım'], ['Elden borç', 'Elden borç']];
-    const gf = (k, label, type, extra) => `<label>${label}<input id="gd-${k}" ${type === 'text' ? 'type="text" maxlength="60"' : type === 'int' ? 'type="text" data-fmt="1" inputmode="numeric"' : 'type="text" data-fmt="1" inputmode="decimal"'} value="${esc(g[k] ?? '')}" data-gf="${k}" ${extra || ''}></label>`;
+    const monthLimit = Number(db.ayarlar.harcama_butceleri?.[ym]) || 0;
+    const end = C.isoOf(now()), start = new Date(now());
+    start.setDate(start.getDate() - 6);
+    const spent = C.recordedSpend(db, ym + '-01', readOnly ? C.dueDate(ym, 31) : end);
+    const weekly = C.recordedSpend(db, C.isoOf(start), end);
     const incomeKnown = db.ek_gelirler.length > 0, income = sumGelir();
-    return `<div class="dash"><div class="dash-head"><div><h1>Gelir ve giderler</h1><span class="muted">Maaş, kira, faturalar ve diğer düzenli ödemeler.</span></div>
+    return `<div class="dash"><div class="dash-head"><div><h1>Bütçem</h1></div>
       <div class="status ${!incomeKnown ? 'warn' : F.toplam > income ? 'bad' : 'ok'}">${incomeKnown ? `<b>Gelir ${M(income)}</b> <span>Sabit gider ${M(F.toplam)} · borç ödemelerinden önce ${M(income - F.toplam)} kalır</span>` : `<b>Gelir eklenmedi</b> <span>Sabit gider ${M(F.toplam)}</span>`}</div></div>
       <div class="dash-cols c3b">
         <section class="dp"><header><h2>Gelirler</h2></header><div class="body" style="padding:0">
           ${gelirler ? `<ul class="list compact">${gelirler}</ul>` : '<div class="empty">Gelir eklenmemiş.</div>'}
-            ${readOnly ? '' : `<form id="form-gelir" class="pad" style="display:grid;gap:8px" novalidate>
-            <label>Açıklama<input id="gl-ad" type="text" maxlength="60" value="${esc(ui.gl.aciklama)}" data-gl="aciklama"></label>
-            <label>Aylık tutar (₺)<input id="gl-tutar" type="text" data-fmt="1" inputmode="decimal" value="${esc(ui.gl.tutar)}" data-gl="tutar"><small class="err" id="gl-err"></small></label>
-            <div class="grid2"><label>Başlangıç ayı<select id="gl-bas" data-gl="baslangic">${monthOpts(ui.gl.baslangic, 'Hemen (bu ay)')}</select></label>
-            <label>Kaç ay? <span class="opt">(boş = sürekli)</span><input id="gl-sure" type="number" min="0" step="1" value="${esc(ui.gl.sure)}" data-gl="sure"></label></div>
-             <div style="display:flex;gap:8px"><button class="btn primary" type="submit" style="flex:1">${ui.gl.id ? 'Değişikliği kaydet' : 'Gelir ekle'}</button>${ui.gl.id ? '<button type="button" class="btn" data-act="gelir-cancel">Vazgeç</button>' : ''}</div></form>`}</div></section>
-        <section class="dp"><header><h2>Sabit giderler</h2><span class="muted">${ui.ym ? C.fmtYM(ui.ym) + ' görünümü' : 'Kutuyu işaretleyince bu ay ödendi sayılır'}</span></header>
+          ${readOnly ? '' : '<button class="btn" data-act="gelir-new">Gelir ekle</button>'}</div></section>
+        <section class="dp"><header><h2>Sabit giderler</h2>${readOnly ? '' : '<button class="btn sm" data-act="gider-new">Gider ekle</button>'}<span class="muted">${ui.ym ? C.fmtYM(ui.ym) + ' görünümü' : 'Kutuyu işaretleyince bu ay ödendi sayılır'}</span></header>
            <div class="body" style="padding:0;overflow:auto">${giderler ? `<ul class="list compact">${giderler}</ul>` : '<div class="empty">Henüz sabit gider eklemediniz.</div>'}</div>
           <div class="foot">${F.kategoriler.map((k) => `<span>${icon(C.giderIkon(k.kategori))} ${esc(k.kategori)} <b>${M(k.tutar)}</b></span>`).join('') || '<span>Bu ay gider yok</span>'}</div></section>
-         ${readOnly ? '' : `<section class="dp"><header><h2>${g.id ? 'Gideri düzenle' : 'Gider ekle'}</h2>${g.id ? '<button class="btn sm" data-act="gider-cancel">Vazgeç</button>' : ''}</header><div class="body" style="overflow:auto">
-          <div class="chips">${presets.map(([a, k]) => `<button type="button" class="btn sm" data-act="gider-preset" data-ad="${esc(a)}" data-k="${esc(k)}">${icon(C.giderIkon(k))} ${a}</button>`).join('')}</div>
-          <form id="form-gider" style="display:grid;gap:8px;margin-top:10px" novalidate>
-            <label>Kategori<select id="gd-kategori" data-gf="kategori">${C.GIDER_KATEGORILERI.map(([k, i]) => `<option ${k === g.kategori ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
-            ${gf('ad', 'Ad', 'text')}
-            <div class="grid2">${gf('tutar', 'Aylık tutar (₺)')}${gf('gun', 'Ödeme günü (1-31)', 'int', 'max="31"')}</div>
-            <label>Başlangıç ayı<select id="gd-bas" data-gf="baslangic">${monthOpts(g.baslangic, 'Bu ay (hemen)')}</select></label>
-            ${gf('sure', elden ? 'Taksit sayısı' : 'Taksit sayısı (boş = sürekli)', 'int')}
-            ${elden ? gf('kalan', 'Kalan toplam borç (₺)') + '<small class="hint" style="margin-top:-4px">Boş bırakırsanız aylık tutar × taksit sayısı alınır.</small>' : ''}
-            <small class="err" id="gd-err"></small><button class="btn primary" type="submit">${g.id ? 'Değişikliği kaydet' : 'Gider ekle'}</button></form>
-           </div></section>`}
+        <section class="dp"><header><h2>Harcama bütçesi</h2></header><div class="body">
+          <p>${C.fmtYM(ym)} · Kayıtlı harcama <b>${M(spent)}</b></p>
+          ${monthLimit ? `<p>Hedef ${M(monthLimit)} · ${spent > monthLimit ? 'Aşım' : 'Kalan'} <b>${M(Math.abs(monthLimit - spent))}</b></p>` : '<p>Bu ay için hedef belirlenmedi.</p>'}
+          <small>Kart alışverişleri işlem tarihinde, vadesiz hesap çıkışları kaydedildikleri tarihte sayılır.</small>
+          ${readOnly ? '' : `<p><button class="btn" data-act="budget-limit">${monthLimit ? 'Hedefi düzenle' : 'Hedef belirle'}</button></p>
+          ${window.KesePush?.dayButton() || ''}<p>Son 7 gün · ${M(weekly)}</p><button class="btn sm" data-act="weekly-insight">Haftalık değerlendirme</button>`}
+        </div></section>
       </div></div>`;
   }
   const sumGelir = () => C.incomeMonthly(db, C.ymOf(now()));
@@ -768,7 +809,7 @@
       ['KMH', 'Hesaplar', counts.KMH],
       ['ELDEN', 'Elden', counts.ELDEN],
     ];
-    const loanActions = !ui.ym && ui.debtFilter === 'KREDI' ? '<div class="debt-actions loan-entry"><button type="button" class="btn primary" data-act="add-kredi">Kredi ekle</button><button type="button" class="btn" data-act="import-loan">Belgeden kredi ekle</button></div>' : '';
+    const loanActions = !ui.ym && ui.debtFilter === 'KREDI' ? '<div class="debt-actions loan-entry"><button type="button" class="btn primary" data-act="add-kredi">Kredi ekle</button></div>' : '';
     const filterBar = `<div class="debt-filters" role="tablist" aria-label="Borç filtreleri">${filters.map(([k, l, n]) =>
       `<button type="button" role="tab" class="btn sm${ui.debtFilter === k ? ' primary on' : ''}" data-debt-filter="${k}" aria-selected="${ui.debtFilter === k}">${l} (${n})</button>`).join('')}</div>`;
 
@@ -795,7 +836,6 @@
             <div class="debt-prog">${lim > 0 ? `<div class="meter${pctUsed > 85 ? ' hot' : ''}" aria-label="Limitin %${pctUsed} kullanılıyor"><i style="width:${pctUsed}%"></i></div>` : ''}<span>${lim > 0 ? `Kullanılan ${M(used)} / ${M(lim)} · kullanılabilir <b>${M(Math.max(0, lim - used))}</b>` : `Kullanılan ${M(used)} · limit girilmedi`}</span></div>
             ${sonraki > 0.5 ? `<div class="debt-meta">${icon('cal')} Sonraki ekstrelere taksitler: <b>${M(sonraki)}</b></div>` : ''}
             <div class="debt-actions">${payAct}<button type="button" class="btn sm" data-act="sel-acc" data-cat="KART" data-id="${a.id}">Detay</button>${ui.ym ? '' : `<button type="button" class="btn sm" data-act="add-har" data-cat="KART" data-pid="${a.id}">Harcama ekle</button>
-              <button type="button" class="btn sm" data-act="import-account" data-cat="KART" data-id="${a.id}">Belge ekle</button>
               <details class="record-actions"><summary>Yönet</summary><div><button type="button" class="btn sm" data-act="edit-hesap" data-cat="KART" data-id="${a.id}">Düzenle</button><button type="button" class="btn sm danger" data-act="del-hesap" data-cat="KART" data-id="${a.id}">Sil</button></div></details>`}</div>
           </article>`,
         });
@@ -855,7 +895,6 @@
             ${faiz > 0 ? `<div class="debt-meta">${icon('warn')} Eksi bakiyeye tahmini aylık faiz: <b class="bad-t">${M(faiz)}</b> (her ayın ${a.hesap_kesim_gunu || 30}. günü)</div>` : ''}
             ${nxt ? `<div class="debt-meta">${icon('cal')} Taksitli avans: <b>${C.fmtDate(nxt.vade)}</b> · ${M(nxt.tutar)}</div>` : ''}
             <div class="debt-actions">${payAct}${bak < 0 && !ui.ym ? `<button type="button" class="btn sm primary" data-act="hesap-giris" data-id="${a.id}" data-tutar="${-bak}">Borcu öde</button>` : ''}<button type="button" class="btn sm" data-act="hesap-giris" data-id="${a.id}">${icon('plus')} Para girişi</button><button type="button" class="btn sm" data-act="sel-acc" data-cat="KMH" data-id="${a.id}">Detay</button>${ui.ym ? '' : `<button type="button" class="btn sm" data-act="add-har" data-cat="KMH" data-pid="${a.id}">Harcama ekle</button>
-              <button type="button" class="btn sm" data-act="import-account" data-cat="KMH" data-id="${a.id}">Belge ekle</button>
               <details class="record-actions"><summary>Yönet</summary><div><button type="button" class="btn sm" data-act="edit-hesap" data-cat="KMH" data-id="${a.id}">Düzenle</button><button type="button" class="btn sm danger" data-act="del-hesap" data-cat="KMH" data-id="${a.id}">Sil</button></div></details>`}</div>
           </article>`,
         });
@@ -1447,6 +1486,7 @@
     const sigSection = sigProds.length ? viewSigortalar() : '';
 
     return `${pageHead('Ayarlar & Yedek', 'Verini güvenle sakla ve uygulama tercihlerini yönet.')}
+      <button type="button" class="btn settings-tools" data-nav="dahafazla">${icon('list')} Tüm araçlar</button>
       <div class="setgrid">
         <div class="setcol">
           <section class="panel"><header><div><h2>Veriler ve yedekler</h2><p>${KeseStore.mode === 'local' ? 'Kayıtlar bu cihazda saklanır. Yedek indirip istediğin zaman geri yükleyebilirsin.' : 'Kayıtlar bu bilgisayarda Kese_data.json dosyasında tutulur.'}</p></div></header>
@@ -1463,6 +1503,7 @@
           <section class="panel"><header><div><h2>Ses efektleri</h2><p>Ödeme kutlamaları ve dokunuş seslerini aç veya kapat.</p></div></header>
             <div class="pad"><button type="button" class="btn" data-act="ses-toggle"></button></div>
           </section>
+          ${sbx.on ? '' : window.KesePush?.panel() || ''}
           ${sigSection}
         </div>
       </div>
@@ -1863,8 +1904,10 @@
       if (!ok) return;
     }
     ui.planApplied = null; db = sbx.real; sbx.on = false; sbx.real = sbx.base = null;
+    window.KesePush?.changed();
     toast('Simülasyondan çıkıldı. Gerçek verileriniz değişmedi.');
     render();
+    showPendingReminder();
   }
   async function resetSim() {
     if (!sbx.on) return;
@@ -2141,7 +2184,7 @@
   const wizBody = () => $('wiz-body');
   let wizFromChooser = false;   // "Borç ekle" türü seçiminden açıldıysa ilk adımda Geri o ekrana döner
   const WIZ_FIELD = 'input:not([type=radio]):not([type=hidden]):not([type=checkbox]):not([disabled]), select:not([disabled]), input[type=radio]:checked, input[type=radio]';
-  function wizFocus() { const f = wizBody().querySelector(WIZ_FIELD); if (f) f.focus(); }
+  function wizFocus() { const f = wizBody().querySelector(WIZ_FIELD + ',button[data-wiz-choice],button[data-wiz-edit],button[data-act="choose-debt-file"]'); if (f) f.focus(); }
   // Hata varsa: ilk boş (yoksa ilk) alanı işaretle ve odağı ona ver.
   function wizMarkInvalid() {
     const fields = [...wizBody().querySelectorAll(WIZ_FIELD)];
@@ -2157,7 +2200,7 @@
     $('wiz-title').textContent = wiz.def.baslik;
     $('wiz-step').textContent = steps.length > 1 ? `Adım ${wiz.i + 1} / ${steps.length}` : '';
     $('wiz-bar').style.width = `${(wiz.i + 1) / steps.length * 100}%`; $('wiz-bar').parentElement.hidden = steps.length === 1;
-    wizBody().innerHTML = `<div class="wizq"><h3>${typeof st.soru === 'function' ? st.soru(wiz.d) : st.soru}</h3>${(typeof st.ipucu === 'function' ? st.ipucu(wiz.d) : st.ipucu) ? `<p class="hint">${typeof st.ipucu === 'function' ? st.ipucu(wiz.d) : st.ipucu}</p>` : ''}${wiz.d.impNote && wiz.d.impStep === wiz.i ? `<div class="live impnote">${wiz.d.impNote}</div>` : ''}${st.liveTop ? '<div class="live top" id="wz-live-top"></div>' : ''}${st.html(wiz.d)}<div class="live" id="wz-live" ${st.live ? '' : 'hidden'} aria-live="polite"></div><small class="err" id="wiz-err" role="alert"></small></div>`;
+    wizBody().innerHTML = `<div class="wizq"><h3>${typeof st.soru === 'function' ? st.soru(wiz.d) : st.soru}</h3>${(typeof st.ipucu === 'function' ? st.ipucu(wiz.d) : st.ipucu) ? `<p class="hint">${typeof st.ipucu === 'function' ? st.ipucu(wiz.d) : st.ipucu}</p>` : ''}${wiz.d.impNote && wiz.d.impStep === wiz.i ? `<div class="live impnote">${wiz.d.impNote}</div>` : ''}${st.liveTop ? '<div class="live top" id="wz-live-top"></div>' : ''}${wiz.def.reminder && wiz.i === 0 ? window.KesePush.dayButton() : ''}${st.html(wiz.d)}<div class="live" id="wz-live" ${st.live ? '' : 'hidden'} aria-live="polite"></div><small class="err" id="wiz-err" role="alert"></small></div>`;
     $('wiz-back').textContent = wiz.i > 0 || wiz.fromChooser ? '‹ Geri' : 'Vazgeç'; $('wiz-next').hidden = !!st.noNext; document.querySelector('#form-wiz footer').hidden = !!st.hideFooter; $('wiz-next').textContent = last ? (wiz.def.saveLabel || 'Kaydet') : 'İleri ›';
     const skipBtn = $('wiz-skip');
     if (skipBtn) skipBtn.hidden = !(wiz.def && typeof wiz.def.onSkip === 'function');
@@ -2181,6 +2224,7 @@
   function wizNext(e) {
     e.preventDefault();
     const steps = wizSteps(), st = steps[wiz.i];
+    if (st.noNext) return;
     if (st.read) st.read(wiz.d, wizBody());
     const err = st.validate ? st.validate(wiz.d) : '';
     if (err) { $('wiz-err').textContent = err; wizMarkInvalid(); return; }
@@ -2195,6 +2239,35 @@
   const bankSelect = (id, cur) => `<select id="${id}">${BANKALAR.map((b) => `<option ${b === (cur || 'Türkiye İş Bankası') ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>`;
   const moneyIn = (id, v) => `<input id="${id}" type="text" data-fmt="1" inputmode="decimal" value="${esc(v ?? '')}">`;
   const posNum = (v) => { const x = num(v); return x > 0 ? x : 0; };
+
+  function wizardChoice(key, question, choices, options = {}) {
+    return { id: key, edit: options.edit, soru: question, skip: options.skip, noNext: true,
+      html: (d) => {
+        const list = typeof choices === 'function' ? choices(d) : choices;
+        return '<div class="wiz-cards bigchoices">' + list.map(([value, label, hint]) =>
+          `<button type="button" class="bigchoice wiz-card" data-wiz-choice="${esc(value)}" aria-pressed="${d[key] === value}"><b>${esc(label)}</b>${hint ? `<small>${esc(hint)}</small>` : ''}</button>`).join('') + '</div>';
+      },
+      choose: (d, value) => { if (options.change) options.change(d, value); d[key] = value; }
+    };
+  }
+  function entryMethod(skip) {
+    return wizardChoice('method', 'Nasıl eklemek istersin?', [['manual', 'Elle gir'], ['document', 'Belgeden doldur']], { skip });
+  }
+  function uploadStep() {
+    return { id: 'upload', soru: 'Belgeni seç', skip: d => d.method !== 'document', noNext: true,
+      html: () => importPicker() + '<p class="hint" id="wz-imp-status" aria-live="polite"></p>' };
+  }
+  function readDraft(d, b) {
+    b.querySelectorAll('input[id^="wz-"]:not([type=file]), select[id^="wz-"]').forEach(el => { d[el.id.slice(3)] = el.value; });
+  }
+  const dayField = (key, label, value, max = 31, min = 1) => fld(label, `<input id="wz-${key}" type="number" min="${min}" max="${max}" step="1" inputmode="numeric" value="${esc(value)}">`);
+  const dateField = (key, label, value) => fld(label, `<input id="wz-${key}" type="date" value="${esc(value)}">`);
+  const boundedInt = (v, lo, hi) => String(v).trim() !== '' && Number.isInteger(Number(v)) && Number(v) >= lo && Number(v) <= hi;
+  function reviewLinks() {
+    return '<div class="debt-actions">' + wizSteps().filter(st => st.edit).map(st =>
+      `<button type="button" class="btn sm" data-wiz-edit="${esc(st.id)}">${esc(st.edit)} düzenle</button>`).join('') + '</div>';
+  }
+  const reviewRows = rows => '<table class="wizsum compact"><tbody>' + rows.filter(Boolean).map(([k,v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('') + '</tbody></table>';
 
   // ----- Kredi alanlarını birbirinden otomatik doldurma -----
   // Çekilen tutar, aylık taksit, taksit sayısı ve faizden biri eksikse diğerlerinden hesaplanıp alana yazılır.
@@ -2277,7 +2350,8 @@
   async function wzImport(files) {
     const def = wiz.def;
     const draft = wiz.d;
-    const current = () => wiz.def === def && wiz.d === draft && $('dlg-wiz').open;
+    const importView = wizBody().firstElementChild;
+    const current = () => wiz.def === def && wiz.d === draft && $('dlg-wiz').open && wizBody().firstElementChild === importView;
     const say = (m, err) => { const el = $('wz-imp-status'); if (el) { el.textContent = m; el.style.color = err ? 'var(--bad)' : ''; } };
     if (!def || !def.importer || !files.length) return;
     const hasAi = !!(window.KeseAI && typeof window.KeseAI.parseFile === 'function');
@@ -2574,61 +2648,50 @@
       ].filter(Boolean);
       return `<table class="wizsum compact"><tbody>${rows.map(([a, v]) => `<tr><td>${a}</td><td>${v}</td></tr>`).join('')}</tbody></table>`;
     };
+    function validateSpend(d) {
+      const p = spendPlan(d);
+      if (!p || !(p.tutar > 0)) return 'Tutarı gir.';
+      if (p.kmh && d.tarih > C.isoOf(now())) return 'Hesap harcamasının tarihi gelecekte olamaz.';
+      return openingStatementConflict(p) || (p.asim && !p.devam ? 'Kullanılabilir bakiye veya limit yetersiz.' : '');
+    }
     openWiz({
       baslik: 'Harcama ekle', saveLabel: 'Kaydet',
       receipt: true,
+      reminder: !!pre?.reminder,
       localDocument: true,
       init: () => ({ src: pick, srcFixed: !!pre?.cat, tur: 'tek', mod: 'yeni', bil: 'tutar', n: '', tutar: pre?.demo ? '1.000' : '', aylik: '', tarih: C.isoOf(now()), ack: pre?.demo ? 'Örnek alışveriş' : '', faiz: '', odenen: '0', sonraki: '', gecmisOdendi: false }),
       importer: (d, receipt) => {
         if (!receipt.tutar) return { ok: false, msg: 'Belgede toplam tutar bulunamadı. Daha net bir fotoğraf seçebilir veya tutarı elle yazabilirsin.' };
         d.tutar = trNum(receipt.tutar);
         d.bil = 'tutar';
-        if (receipt.tarih) d.tarih = receipt.tarih;
+        d.tarih = receipt.tarih || '';
         if (receipt.aciklama) d.ack = receipt.aciklama;
-        if (receipt.taksit > 1 && !isK(d)) { d.tur = 'taksit'; d.n = String(receipt.taksit); }
-        return { ok: true, goto: 0 };
+        d.tur = receipt.taksit > 1 && !isK(d) ? 'taksit' : 'tek';
+        Object.assign(d, { n: d.tur === 'taksit' ? String(receipt.taksit) : '', faiz: '', odenen: '0', sonraki: '', mod: 'yeni' });
+        const steps = wizSteps();
+        const goto = !d.tarih || validateSpend(d) ? steps.findIndex(st => st.id === 'amount') : steps.length - 1;
+        return { ok: true, goto };
       },
-      steps: [{ soru: 'Harcama bilgileri',
-        html: (d) => (d.srcFixed || srcs.length === 1 ? kartInfo(d) : fld('Kart veya hesap', `<select id="wz-src">${srcs.map((x) => `<option value="${x.key}" ${x.key === d.src ? 'selected' : ''}>${esc(x.ad)}</option>`).join('')}</select>`))
-          + documentFields('Fiş, slip veya dekonttan doldur', pre?.document)
-          + fgrp('İşlem',
-            (!isK(d) || kmhLim(d) ? fld('İşlem türü', `<select id="wz-stur">${(isK(d) ? [['tek', 'Hesap harcaması'], ['avans', 'Taksitli nakit avans (artı para)']] : SPEND_TUR).map(([value, label]) => `<option value="${value}" ${d.tur === value ? 'selected' : ''}>${label}</option>`).join('')}</select>`) : '')
-            + (tak(d) ? fld('Bildiğin tutar', `<select id="wz-bil"><option value="tutar">Ana para / işlem tutarı</option><option value="taksit" ${d.bil === 'taksit' ? 'selected' : ''}>Aylık taksit</option></select>`) : '')
-            + (tak(d) && d.bil === 'taksit' ? fld('Aylık taksit (₺)', moneyIn('wz-aylik', d.aylik)) : fld('İşlem tutarı (₺)', moneyIn('wz-tutar', d.tutar)))
-            + fld('İşlem tarihi', `<input id="wz-tarih" type="date" value="${esc(d.tarih)}">`)
-            + fld('Açıklama', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`))
-          + (tak(d) ? fgrp('Ödeme planı',
-            fld('Toplam taksit', `<input id="wz-n" type="number" min="2" max="60" step="1" value="${esc(d.n)}">`)
-            + fld('Ödenen taksit', `<input id="wz-odenen" type="number" min="0" step="1" value="${esc(d.odenen)}">`)
-            + fld('Sıradaki vade (isteğe bağlı)', `<input id="wz-sonraki" type="date" value="${esc(d.sonraki)}">`)
-            + fld('Aylık faiz (%)', moneyIn('wz-faiz', d.faiz) + '<small class="hint" id="wz-rate-hint">Faizsiz taksit için 0 yaz.</small>')) : ''),
-        read: (d, b) => {
-          ['tutar', 'aylik', 'tarih', 'ack', 'n', 'odenen', 'sonraki', 'faiz', 'bil'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); });
-          const prevSrc = d.src;
-          d.src = wzVal(b, 'wz-src') || d.src;
-          d.tur = prevSrc === d.src ? wzVal(b, 'wz-stur') || d.tur : 'tek';
-          d.mod = tak(d) && d.sonraki ? 'devam' : 'yeni';
-        },
-        live: (d) => {
-          const p = spendPlan(d);
-          if (!p) return '';
-          const hint = $('wz-rate-hint');
-          if (hint) hint.textContent = `Boşsa TCMB azami oranı (${pct(spendRate({ ...d, faiz: '' }, p.src))}) ile tahmin edilir. Faizsiz taksit için 0 yaz.`;
-          if (!(p.tutar > 0) || (tak(d) && !(Number(d.n) >= 2))) return '';
-          return summary(d) + (tak(d) ? `<details><summary>Ödeme tarihleri</summary><ul class="list compact">${p.taksitler.map((t) => `<li><span>${t.no}. taksit · ${C.fmtDate(t.vade_tarihi)}</span><b>${M(t.tutar)}${t.odendi ? ' · Ödendi' : ''}</b></li>`).join('')}</ul></details>` : '');
-        },
-        validate: (d) => {
-          if (!d.tarih) return 'İşlem tarihini seç.';
-          if (tak(d)) {
-            if (!Number.isInteger(Number(d.n)) || Number(d.n) < 2 || Number(d.n) > 60) return 'Toplam taksiti 2 ile 60 arasında gir.';
-            if (!Number.isInteger(Number(d.odenen)) || Number(d.odenen) < 0 || Number(d.odenen) >= Number(d.n)) return 'Ödenen taksit, toplam taksitten az olmalı.';
-            if (d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 20)) return 'Aylık faizi 0 ile 20 arasında gir.';
-          }
-          const p = spendPlan(d);
-          if (!p || !(p.tutar > 0)) return 'Tutarı gir.';
-          if (p.kmh && d.tarih > C.isoOf(now())) return 'Hesap harcamasının tarihi gelecekte olamaz.';
-          return openingStatementConflict(p) || (p.asim && !p.devam ? 'Kullanılabilir bakiye veya limit yetersiz.' : '');
-        } }],
+      steps: [
+        wizardChoice('src', 'Hangi karttan veya hesaptan?', srcs.map(x => [x.key, x.ad, x.sub]), { skip: d => d.srcFixed || srcs.length === 1, change: (d, v) => { if (d.src !== v) d.tur = 'tek'; } }),
+        entryMethod(), uploadStep(),
+        wizardChoice('tur', 'Hangi işlem türü?', d => isK(d) ? [['tek', 'Hesap harcaması'], ['avans', 'Taksitli nakit avans']] : SPEND_TUR, { edit: 'İşlem türünü', skip: d => isK(d) && !kmhLim(d) }),
+        wizardChoice('bil', 'Hangi tutarı biliyorsun?', [['tutar','İşlem tutarı'],['taksit','Aylık taksit']], { skip: d => !tak(d) }),
+        { id: 'amount', edit: 'İşlemi', soru: 'Harcama bilgileri',
+          html: d => kartInfo(d) + fgrp('İşlem', (tak(d) && d.bil === 'taksit' ? fld('Aylık taksit (₺) *', moneyIn('wz-aylik', d.aylik)) : fld('İşlem tutarı (₺) *', moneyIn('wz-tutar', d.tutar)))
+            + dateField('tarih','İşlem tarihi *', d.tarih) + fld('Açıklama (isteğe bağlı)', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`)),
+          read: readDraft,
+          validate: d => !posNum(tak(d) && d.bil === 'taksit' ? d.aylik : d.tutar) ? 'Tutarı gir.' : !d.tarih ? 'İşlem tarihini seç.' : !tak(d) ? validateSpend(d) : '' },
+        { id: 'schedule', edit: 'Planı', soru: 'Taksit planı', skip: d => !tak(d),
+          html: d => fgrp('Ödeme planı', dayField('n','Toplam taksit *',d.n,60,2)
+            + dayField('odenen','Ödenen taksit',d.odenen,59,0)
+            + dateField('sonraki','Sıradaki vade (isteğe bağlı)',d.sonraki)
+            + fld('Aylık faiz (%)', moneyIn('wz-faiz',d.faiz) + `<small class="hint">Faizsiz taksit için 0 yaz. Boş bırakırsan %${trNum(spendRate({...d, faiz:''},srcOf(d)))} ile tahmin edilir.</small>`)),
+          read: (d,b) => { readDraft(d,b); d.mod = d.sonraki ? 'devam' : 'yeni'; },
+          validate: d => !boundedInt(d.n,2,60) ? 'Toplam taksiti 2 ile 60 arasında gir.' : !boundedInt(d.odenen || 0,0,Number(d.n)-1) ? 'Ödenen taksit, toplam taksitten az olmalı.' : d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 20) ? 'Aylık faizi 0 ile 20 arasında gir.' : validateSpend(d) },
+        { soru: 'Harcamayı kontrol et', html: d => kartInfo(d) + reviewRows([['İşlem tarihi',C.fmtDate(d.tarih)], d.ack && ['Açıklama',d.ack]]) + summary(d)
+            + (tak(d) ? `<details><summary>Ödeme tarihleri</summary><ul class="list compact">${spendPlan(d).taksitler.map(t => `<li><span>${t.no}. taksit · ${C.fmtDate(t.vade_tarihi)}</span><b>${M(t.tutar)}${t.odendi ? ' · Ödendi' : ''}</b></li>`).join('')}</ul></details>` : '') + reviewLinks(), validate: validateSpend }
+      ],
       save: (d) => {
         const p = spendPlan(d); if (!p) return;
         ui.lastSrc = d.src;
@@ -2639,12 +2702,12 @@
         }
         if (p.kmhAvans) {
           const a = p.src.acc;
-          a.hareketler.push({ id: nextId(a.hareketler, 1000), tur: 'Taksitli KMH', aciklama: d.ack.trim() || 'Taksitli nakit avans', tarih: p.devam ? C.dueDate(C.ymAdd(p.ilkYm, -1), a.hesap_kesim_gunu || 30) : d.tarih, ilk_taksit_ym: p.ilkYm, ana_para: p.ana, faiz_orani: p.faiz, toplam_geri_odeme: p.toplam, toplam_taksit: p.n, taksitler: p.taksitler });
+          a.hareketler.push({ id: nextId(a.hareketler, 1000), tur: 'Taksitli KMH', aciklama: d.ack.trim() || 'Taksitli nakit avans', tarih: d.tarih, ilk_taksit_ym: p.ilkYm, ana_para: p.ana, faiz_orani: p.faiz, toplam_geri_odeme: p.toplam, toplam_taksit: p.n, taksitler: p.taksitler });
           ui.selKmh = a.id; save(`Taksitli nakit avans eklendi; ${p.n - p.odenen} taksit kaldı.`);
           return;
         }
         const k = p.src.acc, tur = d.tur === 'tek' ? 'Tek Çekim Harcama' : d.tur === 'avans' ? 'Taksitli Nakit Avans' : 'Taksitli Alışveriş';
-        k.hareketler.push({ id: nextId(k.hareketler, 1000), tur, aciklama: d.ack.trim() || tur, tarih: p.devam ? C.dueDate(C.ymAdd(p.ilkYm, -1), k.kesim_gunu || 15) : d.tarih, ilk_taksit_ym: p.ilkYm, ana_para: p.ana, faiz_orani: p.faiz, toplam_geri_odeme: p.toplam, toplam_taksit: p.n, taksitler: p.taksitler });
+        k.hareketler.push({ id: nextId(k.hareketler, 1000), tur, aciklama: d.ack.trim() || tur, tarih: d.tarih, ilk_taksit_ym: p.ilkYm, ana_para: p.ana, faiz_orani: p.faiz, toplam_geri_odeme: p.toplam, toplam_taksit: p.n, taksitler: p.taksitler });
         ui.selKart = k.id; save(p.devam ? `${tur} eklendi; ${p.n - p.odenen} taksit kaldı.` : `Harcama ${C.fmtDate(p.ex.kesimIso)} ekstresine eklendi.`);
       },
     });
@@ -2696,6 +2759,137 @@
       steps: [{ soru: 'Hangi kart veya hesapta?', ipucu: 'Geçmiş dönemden kalan, gecikme faizi işleyen borç için.', html: (d) => choiceHtml('wz-gp', list, d.v), read: (d, b) => { const v = wzRadio(b, 'wz-gp'); if (v) d.v = v; } }],
       save: (d) => setTimeout(() => go(d.v), 50) });
   }
+  function openRecurring(income, id) {
+    const list = income ? db.ek_gelirler : db.sabit_giderler;
+    const record = id ? list.find((x) => x.id === id) : null;
+    if (id && !record) return;
+    if (record?.kategori === 'Elden borç') return openAddElden(id);
+    const label = income ? 'Gelir' : 'Gider';
+    openWiz({
+      baslik: label + (id ? ' düzenle' : ' ekle'),
+      init: () => ({ ad: (income ? record?.aciklama : record?.ad) || '', kategori: record?.kategori || 'Kira',
+        tutar: record ? trNum(record.tutar) : '', bas: record?.baslangic_ym || '', sure: record?.sure || '', gun: record?.gun || '' }),
+      steps: [{ soru: label + ' bilgileri',
+        html: (d) => (income ? '' : fld('Kategori', `<select id="wz-rec-cat">${C.GIDER_KATEGORILERI.filter(([k]) => k !== 'Elden borç').map(([k]) => `<option ${k === d.kategori ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>`))
+          + fld('Ad', `<input id="wz-rec-name" maxlength="60" value="${esc(d.ad)}">`)
+          + fld('Aylık tutar (₺)', moneyIn('wz-rec-amount', d.tutar)),
+        read: (d, b) => {
+          d.ad = wzVal(b, 'wz-rec-name'); d.tutar = wzVal(b, 'wz-rec-amount');
+          if (!income) d.kategori = wzVal(b, 'wz-rec-cat');
+        },
+        validate: (d) => posNum(d.tutar) > 0 ? '' : 'Aylık tutarı gir.',
+      }, { soru: 'Hangi aylarda tekrarlanacak?',
+        html: (d) => fld('Başlangıç ayı', `<select id="wz-rec-start">${monthOpts(d.bas, 'Bu ay')}</select>`)
+          + fld('Kaç ay? (sürekliyse boş bırak)', `<input type="number" id="wz-rec-months" min="1" value="${esc(d.sure)}">`)
+          + (income ? '' : fld('Ödeme günü (isteğe bağlı)', `<input type="number" id="wz-rec-day" min="1" max="31" value="${esc(d.gun)}">`)),
+        read: (d, b) => {
+          d.bas = wzVal(b, 'wz-rec-start'); d.sure = wzVal(b, 'wz-rec-months');
+          if (!income) d.gun = wzVal(b, 'wz-rec-day');
+        },
+        validate: (d) => {
+          const months = Number(d.sure), day = Number(d.gun), max = income ? 600 : 360;
+          if (d.sure && !(Number.isInteger(months) && months >= 1 && months <= max)) return `Ay sayısı 1 ile ${max} arasında olmalı.`;
+          if (!income && d.gun && !(Number.isInteger(day) && day >= 1 && day <= 31)) return 'Ödeme günü 1 ile 31 arasında olmalı.';
+          return '';
+        },
+      }],
+      save: (d) => {
+        const item = record || { id: nextId(list, 0) };
+        item.tutar = C.r2(posNum(d.tutar));
+        item.sure = Number(d.sure) || 0;
+        item.baslangic_ym = d.bas || C.ymOf(now());
+        if (income) item.aciklama = d.ad.trim() || 'Gelir';
+        else {
+          item.ad = d.ad.trim() || d.kategori; item.kategori = d.kategori;
+          item.gun = Number(d.gun) || 0;
+          if (!record) item.odendi_aylar = [];
+        }
+        if (!record) list.push(item);
+        save(label + ' kaydedildi.');
+      },
+    });
+  }
+
+  function openSpendingLimit() {
+    const month = C.ymOf(now()), prev = db.ayarlar.harcama_butceleri?.[month];
+    openWiz({
+      baslik: 'Harcama bütçesi', init: () => ({ limit: prev ? trNum(prev) : '' }),
+      steps: [{ soru: C.fmtYM(month) + ' için harcama hedefin ne kadar?',
+        html: (d) => fld('Aylık hedef (₺)', moneyIn('wz-limit', d.limit)),
+        read: (d, b) => { d.limit = wzVal(b, 'wz-limit'); },
+        validate: (d) => posNum(d.limit) > 0 ? '' : 'Sıfırdan büyük bir hedef gir.',
+      }],
+      save: (d) => {
+        db.ayarlar.harcama_butceleri = { ...db.ayarlar.harcama_butceleri, [month]: C.r2(posNum(d.limit)) };
+        save('Harcama hedefi kaydedildi.');
+      },
+    });
+  }
+
+  function openWeeklyDiscipline() {
+    const today = new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10);
+    const marked = new Set(Array.isArray(S().harcamasiz_gunler) ? S().harcamasiz_gunler : []);
+    const days = Array.from({length: 7}, (_, i) =>
+      new Date(Date.parse(today) - (6 - i) * 86400000).toISOString().slice(0, 10));
+    const rows = days.map(date => {
+      const spent = C.recordedSpend(db, date, date);
+      return {date, logged: spent > 0 || marked.has(date),
+        label: spent > 0 ? M(spent) : marked.has(date) ? 'Harcamasız gün' : 'Kayıt yok'};
+    });
+    openWiz({baslik: 'Haftalık disiplin özeti', init: () => ({}), steps: [{
+      soru: `Son 7 günün ${rows.filter(row => row.logged).length} gününde kayıt var`,
+      noNext: true, hideFooter: true,
+      html: () => '<ul class="list compact">' + rows.map(row =>
+        `<li><span>${C.fmtDate(row.date)}</span><b>${row.label}</b></li>`).join('') +
+        '</ul><button class="btn" type="button" data-act="weekly-insight">Asistan ile değerlendir</button>'
+    }]});
+  }
+
+  const reminderViews = new Map([['daily','butce'], ['weekly','butce'], ['due','takvim'], ['complete','borclar']]);
+  let pendingReminder = '';
+  function showPendingReminder() {
+    if (!pendingReminder || !db || sbx.on || document.querySelector('dialog[open]') ||
+        document.activeElement?.matches('input, textarea, select, [contenteditable="true"]')) return;
+    const kind = pendingReminder;
+    pendingReminder = '';
+    setView(reminderViews.get(kind));
+    if (kind === 'weekly') openWeeklyDiscipline();
+    if (kind === 'daily') {
+      if (spendSources().length) openSpend({reminder: true});
+      else openWiz({baslik: 'Günlük harcama kaydı', init: () => ({}), steps: [{
+        soru: 'Bugün harcama yaptın mı?', noNext: true, hideFooter: true,
+        html: () => window.KesePush.dayButton() +
+          '<p>Harcamayı kaydetmek için hesabını ekleyebilirsin.</p><button type="button" class="btn" data-wzgo="kart">Kredi kartı ekle</button> <button type="button" class="btn" data-wzgo="hesapv">Vadesiz hesap ekle</button>'
+      }]});
+    }
+  }
+  function requestReminder(kind) {
+    if (!reminderViews.has(kind)) return;
+    pendingReminder = kind;
+    showPendingReminder();
+  }
+  for (const event of ['close', 'focusout']) document.addEventListener(event, () => {
+    if (pendingReminder) setTimeout(showPendingReminder, 0);
+  }, true);
+  navigator.serviceWorker?.addEventListener('message', ev => {
+    if (ev.data?.type === 'kese-notification') requestReminder(ev.data.kind);
+  });
+  async function weeklyInsight() {
+    const ai = window.KeseAI;
+    if (!ai || !(await ai.checkStatus(true).catch(() => null))?.available) {
+      toast('Haftalık değerlendirme için Kese Asistan şu an çevrimdışı.');
+      return;
+    }
+    if (ui.view !== 'butce' || ui.ym) return;
+    const end = now(), start = new Date(end), month = C.ymOf(end);
+    start.setDate(start.getDate() - 6);
+    const weekly = C.recordedSpend(db, C.isoOf(start), C.isoOf(end));
+    const monthly = C.recordedSpend(db, month + '-01', C.isoOf(end));
+    const limit = db.ayarlar.harcama_butceleri?.[month];
+    ai.openModal({ getDb: () => db, getCalc: () => C, getNow: now, getSettings: S,
+      initialPrompt: `Son 7 günlük kayıtlı harcamam ${M(weekly)}, bu ayki harcamam ${M(monthly)}. ${limit ? 'Aylık harcama hedefim ' + M(limit) + '.' : 'Aylık hedef belirlemedim.'} Bu haftayı değerlendir ve gelecek hafta için bir somut adım öner.` });
+  }
+
   function openAddElden(editId) {
     const existing = editId ? db.sabit_giderler.find((x) => x.id === editId) : null;
     if (editId && !existing) return;
@@ -2705,14 +2899,15 @@
       init: () => existing
         ? { ad: existing.ad || '', kalan: existing.kalan != null ? trNum(existing.kalan) : '', tutar: existing.tutar ? trNum(existing.tutar) : '', gun: String(existing.gun || 15) }
         : { ad: '', kalan: '', tutar: '', gun: '15' },
-      steps: [{ soru: existing ? 'Borç bilgilerini güncelle' : 'Kime, ne kadar borcun var?', ipucu: 'Tek adımda kaydet; her ay hatırlatalım, ödedikçe düşelim.',
-        html: (d) => fgrp('Elden borç bilgileri',
-          fld('Kime?', `<input id="wz-ad" type="text" maxlength="60" value="${esc(d.ad)}" placeholder="Örn: Ahmet, Annem, Ev sahibi">`)
-          + fld('Toplam kalan borç (₺)', moneyIn('wz-kalan', d.kalan))
-          + fld('Aylık ne kadar ödeyeceksin? (₺)', moneyIn('wz-tutar', d.tutar))
-          + fld('Ödeme günü (1-31)', `<input id="wz-gun" type="number" min="1" max="31" step="1" inputmode="numeric" value="${esc(d.gun)}">`)
-        ),
-        read: (d, b) => { d.ad = wzVal(b, 'wz-ad'); d.kalan = wzVal(b, 'wz-kalan'); d.tutar = wzVal(b, 'wz-tutar'); d.gun = wzVal(b, 'wz-gun'); },
+      steps: [{ soru: 'Kime, ne kadar borcun var?',
+        html: (d) => fld('Kime?', `<input id="wz-ad" maxlength="60" value="${esc(d.ad)}">`)
+          + fld('Toplam kalan borç (₺)', moneyIn('wz-kalan', d.kalan)),
+        read: (d, b) => { d.ad = wzVal(b, 'wz-ad'); d.kalan = wzVal(b, 'wz-kalan'); },
+        validate: (d) => !d.ad.trim() ? 'Kime borçlu olduğunu yazın.' : !(posNum(d.kalan) > 0) ? 'Toplam borç tutarını yazın.' : '',
+      }, { soru: 'Her ay ne zaman, ne kadar ödeyeceksin?',
+        html: (d) => fld('Aylık ödeme (₺)', moneyIn('wz-tutar', d.tutar))
+          + fld('Ödeme günü', `<input id="wz-gun" type="number" min="1" max="31" value="${esc(d.gun)}">`),
+        read: (d, b) => { d.tutar = wzVal(b, 'wz-tutar'); d.gun = wzVal(b, 'wz-gun'); },
         liveTop: (d) => {
           const k = posNum(d.kalan), t = posNum(d.tutar);
           if (!(k > 0) || !(t > 0)) return '<div class="bigresult"><small>Toplam borç ve aylık ödemeyi yaz; kaç ayda biteceğini gösterelim.</small></div>';
@@ -2723,8 +2918,8 @@
           if (!d.ad.trim()) return 'Kime borçlu olduğunu yazın.';
           if (!(posNum(d.kalan) > 0)) return 'Toplam borç tutarını yazın.';
           if (!(posNum(d.tutar) > 0)) return 'Aylık ödeme tutarını yazın.';
-          const g = parseInt(d.gun);
-          if (!(g >= 1 && g <= 31)) return 'Ödeme günü 1 ile 31 arasında olmalı.';
+          const g = Number(d.gun);
+          if (!(Number.isInteger(g) && g >= 1 && g <= 31)) return 'Ödeme günü 1 ile 31 arasında olmalı.';
           return '';
         },
       }],
@@ -2789,7 +2984,10 @@
     const scheduleChanged = (d) => parseInt(d.kalan) !== pending.length
       || posNum(d.aylik) !== (firstPending ? firstPending.tutar : 0)
       || d.sonraki !== (firstPending ? firstPending.vade_tarihi : '');
-    const nOf = (d) => (existing ? history.length + (parseInt(d.kalan) || 0) : null);
+    const remainingOnly = d => !existing && d.stage === 'ongoing' && d.historyMode !== 'yes';
+    const principalLabel = d => remainingOnly(d) ? 'Kalan ana para' : 'Çekilen ana para';
+    const nOf = d => existing ? history.length + (Number(d.kalan) || 0)
+      : d.stage === 'ongoing' && d.historyMode === 'yes' ? Number(d.toplam) : Number(d.kalan);
     const srcTag = (src) => (src === 'girdi' ? '' : src === 'hesap' ? ' <span class="calc-tag">hesaplandı</span>' : ' <span class="calc-tag est">tahmini</span>');
     openWiz({
       baslik: (editId ? 'Krediyi düzenle' : (kmhPlan ? 'KMH taksit planı' : 'Taksitli kredi / borç ekle')) + (pre && pre.queue ? ` · ${pre.queue}` : ''),
@@ -2807,34 +3005,45 @@
         if (result.faiz != null) d.faiz = trNum(result.faiz);
         if (BANKALAR.includes(result.banka)) d.banka = result.banka;
         if (KREDI_TURLERI.some(([tur]) => tur === result.tur)) d.tur = result.tur;
-        return { ok: true, goto: 0 };
+        d.stage = Number(d.toplam) > Number(d.kalan) && Number(d.kalan) > 0 ? 'ongoing' : 'new';
+        d.historyMode = d.stage === 'ongoing' ? 'yes' : 'no';
+        if (!d.kalan && d.toplam) d.kalan = d.toplam;
+        return { ok: true, goto: wiz.i + 1 };
       },
       init: () => {
         if (!existing) {
           const base = { ad: '', banka: '', tur: tur0, kmhPlan, loanAmount: 'aylik', aylik: '', kalan: '', sonraki: '', toplam: '', ana: '', faiz: '' };
           const x = pre && pre.d ? Object.assign(base, pre.d) : base;
+          x.stage = Number(x.toplam) > Number(x.kalan) && Number(x.kalan) > 0 ? 'ongoing' : 'new';
+          x.historyMode = x.stage === 'ongoing' ? 'yes' : 'no';
           if (!x.faizManual) x.faiz = '';      // bilinmeyen faiz: alan boş kalır, ortalama faizle tahmin gösterilir
           return x;
         }
         return { ad: existing.kredi_adi, banka: existing.banka === 'Diğer' ? '' : existing.banka, tur: existing.kredi_turu || tur0, aylik: firstPending ? trNum(firstPending.tutar) : '', kalan: String(pending.length), sonraki: firstPending ? firstPending.vade_tarihi : '', toplam: '', ana: trNum(existing.ana_para), faiz: trNum(existing.faiz_orani) };
       },
-      steps: [{ soru: existing ? 'Kredi bilgileri' : 'Kredinin bilgileri', ipucu: existing ? 'Ödenmiş taksitler korunur; yalnızca kalan taksitler yeniden düzenlenir.' : 'Bankanın uygulamasındaki kredi ekranında yazan bilgileri gir. Yıldızlı (*) alanlar yeterli.',
-        html: (d) => (existing ? '' : documentFields('Dekont veya ödeme planından doldur', pre?.document)) + fgrp('Taksitler',
-            (existing ? '' : fld('Bildiğin tutar', `<select id="wz-loanAmount"><option value="aylik">Aylık taksit</option><option value="ana" ${d.loanAmount === 'ana' ? 'selected' : ''}>Çekilen ana para</option></select>`))
-            + (d.loanAmount === 'ana' ? fld('Çekilen ana para (₺) *', moneyIn('wz-ana', d.ana)) : fld('Aylık taksit tutarı (₺) *', moneyIn('wz-aylik', d.aylik)))
-            + fld('Sıradaki taksit tarihi *', `<input id="wz-sonraki" type="date" value="${esc(d.sonraki)}">`)
-            + fld('Kalan taksit sayısı *', `<input id="wz-kalan" type="number" min="1" max="360" step="1" inputmode="numeric" value="${esc(d.kalan)}" placeholder="Örn: 5">`))
-          + `<details class="wide"${existing || (pre && pre.d) ? ' open' : ''}><summary>Varsa kredi ayrıntılarını ekle</summary>${fgrp('Kredi',
-            fld('Kredi adı', `<input id="wz-ad" type="text" maxlength="60" value="${esc(d.ad)}" placeholder="Örn: İhtiyaç kredisi, Telefon taksiti">`)
-            + fld('Banka', `<select id="wz-banka"><option value="">Belirtilmedi</option>${BANKALAR.map((b) => `<option ${b === d.banka ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>`)
-            + (kmhPlan ? '' : fld('Kredi türü', `<select id="wz-tur">${KREDI_TURLERI.map(([v, t]) => `<option value="${esc(v)}" ${v === (d.tur || tur0) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`)))
-          + fgrp('Ödeme geçmişi',
-            (existing ? `<div class="fld-info"><span>Ödenmiş taksit</span><b>${history.length}</b></div>`
-              : fld('Toplam taksit sayısı (vade)', `<input id="wz-toplam" type="number" min="1" max="360" step="1" inputmode="numeric" value="${esc(d.toplam)}" placeholder="Boşsa kalan kadar"><small class="hint">Kredi kaç ay vadeliydi? Örn: 24. Ödenmiş taksitler buna göre hesaplanır.</small>`)))
-          + fgrp('Faiz ve çekilen tutar',
-            fld('Aylık faiz oranı (%)', `<input id="wz-faiz" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.faiz)}"><small class="hint" id="wz-faiz-hint"></small>`)
-            + (d.loanAmount === 'ana' ? '' : fld('Çekilen tutar / ana para (₺)', `<input id="wz-ana" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.ana)}"><small class="hint" id="wz-ana-hint"></small>`)))}</details>`,
-        read: (d, b) => { ['aylik', 'kalan', 'sonraki', 'ad', 'banka', 'toplam', 'ana', 'faiz', 'tur', 'loanAmount'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); }); },
+      steps: [
+        entryMethod(() => !!existing || !!pre?.d), uploadStep(),
+        wizardChoice('stage', 'Kredin hangi aşamada?', [['new','Yeni kredi','Henüz taksit ödemedim'],['ongoing','Devam eden kredi','Kalan ödemelerimi takip etmek istiyorum']], { skip: () => !!existing }),
+        wizardChoice('historyMode', 'Ödeme geçmişini eklemek ister misin?', [['no','Yalnızca kalan taksitler'],['yes','Ödenmiş taksitleri de ekle']], { skip: d => !!existing || d.stage !== 'ongoing', change: (d,v) => { if (d.historyMode !== v) d.ana = ''; } }),
+        wizardChoice('loanAmount', 'Hangi tutarı biliyorsun?', d => [['aylik','Aylık taksit'],['ana',principalLabel(d)]], { skip: () => !!existing }),
+        { id: 'terms', edit: 'Taksitleri', soru: 'Taksit bilgileri',
+          html: d => fgrp('Taksitler',
+            (d.loanAmount === 'ana' ? fld(principalLabel(d) + ' (₺) *', moneyIn('wz-ana', d.ana)) : fld('Aylık taksit tutarı (₺) *', moneyIn('wz-aylik', d.aylik)))
+            + dayField('kalan', existing || d.stage === 'ongoing' ? 'Kalan taksit sayısı *' : 'Vade (ay) *', d.kalan,360)
+            + (!existing && d.stage === 'ongoing' && d.historyMode === 'yes' ? dayField('toplam','Başlangıçtaki toplam taksit sayısı *',d.toplam,360) : '')
+            + dateField('sonraki', existing || d.stage === 'ongoing' ? 'Sıradaki taksit tarihi *' : 'İlk taksit tarihi *',d.sonraki)),
+          read: readDraft,
+          validate: d => !posNum(d.loanAmount === 'ana' ? d.ana : d.aylik) ? 'Bildiğin tutarı gir.' : !boundedInt(d.kalan,1,360) ? 'Taksit sayısını 1 ile 360 arasında gir.' : !d.sonraki ? 'Taksit tarihini seç.' : !existing && d.stage === 'ongoing' && d.historyMode === 'yes' && !boundedInt(d.toplam,Number(d.kalan),360) ? 'Başlangıçtaki toplam vade, kalan taksit sayısından az olamaz.' : '' },
+        { id: 'loanDetails', edit: 'Ayrıntıları', soru: 'Kredi ayrıntıları', ipucu: 'Bildiğin alanları doldurabilir veya doğrudan özete geçebilirsin.',
+          html: d => fgrp('Kredi', fld('Kredi adı', `<input id="wz-ad" maxlength="60" value="${esc(d.ad)}">`)
+            + fld('Banka', `<select id="wz-banka"><option value="">Belirtilmedi</option>${BANKALAR.map(b => `<option ${b === d.banka ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>`)
+            + (kmhPlan ? '' : fld('Kredi türü', `<select id="wz-tur">${KREDI_TURLERI.map(([v,t]) => `<option value="${esc(v)}" ${v === d.tur ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`))
+            + fld('Aylık faiz (%)', moneyIn('wz-faiz',d.faiz) + '<small class="hint">Boş bırakırsan faiz tahmini hesaplanır.</small>')
+            + (d.loanAmount === 'ana' ? '' : fld(principalLabel(d) + ' (₺)',moneyIn('wz-ana',d.ana)))),
+          read: readDraft,
+          validate: d => d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 15) ? 'Aylık faiz 0 ile 15 arasında olmalı.' : kalanPlan(d,nOf(d)).hata || '' },
+        { soru: 'Krediyi kontrol et',
+          html: d => reviewRows([['Kredi',d.ad || d.tur],d.banka && ['Banka',d.banka],['Sıradaki ödeme',C.fmtDate(d.sonraki)]]) + reviewLinks(),
         liveTop: (d) => {
           const p = kalanPlan(d, nOf(d)), b = wizBody(), tur = d.tur || tur0, konut = tur === 'Konut Kredisi';
           const fe = b.querySelector('#wz-faiz'), ae = b.querySelector('#wz-ana'), fh = b.querySelector('#wz-faiz-hint'), ah = b.querySelector('#wz-ana-hint');
@@ -2845,9 +3054,9 @@
           if (!(p.aylik > 0) || !(p.kalan >= 1)) { d._sumHtml = ''; return '<div class="bigresult"><small>Tutarı ve kalan taksiti girince borç özeti burada görünür.</small></div>'; }
           const sonYm = d.sonraki ? C.ymAdd(d.sonraki.slice(0, 7), p.kalan - 1) : null;
           const rows = [
-            ['Ödenen / kalan taksit', `${p.odenen} / ${p.kalan} (toplam ${p.n})`],
+            remainingOnly(d) ? ['Kalan taksit', p.kalan] : ['Ödenen / kalan taksit', `${p.odenen} / ${p.kalan} (toplam ${p.n})`],
             sonYm ? ['Son taksit', C.fmtYM(sonYm)] : null,
-            ['Çekilen tutar', M(p.ana) + srcTag(p.anaSrc)],
+            [principalLabel(d), M(p.ana) + srcTag(p.anaSrc)],
             ['Aylık faiz', `%${trNum(p.faiz)}` + srcTag(d.loanAmount === 'ana' && d.faiz === '' ? 'varsayilan' : p.faizSrc) + (konut ? '' : ` <small class="muted">(vergiyle %${trNum(C.r2(p.faiz * p.vergi))})</small>`)],
             ['Toplam geri ödeme', M(p.toplamOdeme)],
             ['Toplam faiz ve vergi', `<span class="bad-t">${M(p.toplamFaiz)}</span>`],
@@ -2863,7 +3072,7 @@
           if (d.loanAmount === 'ana' ? !(posNum(d.ana) > 0) : !(posNum(d.aylik) > 0)) return 'Bildiğin tutarı gir.';
           const kn = parseInt(d.kalan); if (!(kn >= 1 && kn <= 360)) return 'Kaç taksit kaldığını yazın (1 ile 360 arası).';
           if (!d.sonraki) return 'Sıradaki taksidin tarihini seçin.';
-          if (!existing && String(d.toplam).trim() !== '') { const tn = parseInt(d.toplam); if (!(tn >= kn && tn <= 360)) return `Toplam taksit sayısı kalan taksitten (${kn}) az olamaz.`; }
+          if (!existing && d.stage === 'ongoing' && d.historyMode === 'yes') { const tn = parseInt(d.toplam); if (!(tn >= kn && tn <= 360)) return `Toplam taksit sayısı kalan taksitten (${kn}) az olamaz.`; }
           if (String(d.faiz).trim() !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 15)) return 'Aylık faiz 0 ile 15 arasında olmalı (yıllık değil, aylık oran).';
           if (existing) {
             if (kn + history.length > 360) return `En fazla ${360 - history.length} bekleyen taksit girebilirsiniz.`;
@@ -3238,58 +3447,39 @@
       baslik: cat === 'KMH' ? 'Vadesiz hesap ekle' : cat === 'KART' ? 'Kredi kartı ekle' : 'Kart / hesap ekle',
       saveLabel: 'Kaydet',
       init: () => { const c = cat || 'KART'; return { cat: c, catFixed: !!cat, banka: (pre && pre.banka) || 'Türkiye İş Bankası', ad: '', limit: '', faiz: '', kesim: c === 'KMH' ? '30' : '', son: '', para: '', kullanilan: '' }; },
+      localDocument: true,
+      importer: (d, result) => {
+        if (result.kind === 'kredi' || !(result.banka || result.limit || result.kesim || result.son)) return { ok:false, msg:'Hesap bilgisi bulunamadı. Başka bir belge seçebilir veya geri dönüp elle girebilirsin.' };
+        if (BANKALAR.includes(result.banka)) d.banka = result.banka;
+        if (result.limit) { d.limit = trNum(result.limit); d.overdraft = 'yes'; }
+        if (result.kesim) d.kesim = String(result.kesim);
+        if (!isK(d) && result.son) d.son = String(result.son);
+        return {ok:true, goto:wiz.i + 1};
+      },
       steps: [
-        { soru: 'Ne eklemek istiyorsun?', ipucu: 'Borcu olmasa da ekleyebilirsin; harcama yaptıkça içine eklersin.', skip: (d) => d.catFixed,
-          html: (d) => choiceHtml('wz-hcat', [['KART', 'Kredi kartı', 'Limit, hesap kesim ve son ödeme günü'], ['KMH', 'Vadesiz hesap', 'Banka hesabın; varsa artı para (KMH) limitiyle']], d.cat),
-          read: (d, b) => { const c = wzRadio(b, 'wz-hcat'); if (c && c !== d.cat) { d.cat = c; d.kesim = c === 'KMH' ? '30' : ''; d.son = ''; } } },
-        { soru: (d) => (isK(d) ? 'Vadesiz hesap bilgileri' : 'Kredi kartı bilgileri'), ipucu: '',
-          html: (d) => {
-            if (isK(d)) {
-              const lim = posNum(d.limit) > 0;
-              return fgrp('Hesap',
-                  fld('Banka', bankSelect('wz-banka', d.banka))
-                  + fld('Hesap adı', `<input id="wz-ad" type="text" maxlength="60" value="${esc(d.ad)}" placeholder="Örn: Maaş hesabı, Vadesiz TL">`)
-                  + fld('Hesaptaki para (₺)', moneyIn('wz-para', d.para) + '<small class="hint">Şu anki bakiye. Hesap eksideyse 0 yaz; artı paradan kullandığını sonra "Harcama ekle" ile gir.</small>'))
-                + fgrp('Artı para / KMH <span class="opt">(varsa)</span>',
-                  fld('Artı para limiti (₺)', moneyIn('wz-limit', d.limit) + '<small class="hint">Sadece limit. Kullandığın tutarları hesap açıldıktan sonra "Harcama ekle"den tek seferlik ya da taksitli nakit avans olarak gir.</small>')
-                  + (`<div class="fg-sub wide" id="wz-kmh-extra" ${lim ? '' : 'hidden'}>` + fld('Aylık faiz (%)', `<input id="wz-faiz" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.faiz)}" placeholder="${trNum(defFaiz('KMH'))}"><small class="hint">Boşsa TCMB azami oranı. Faize %15 BSMV + %15 KKDF eklenir.</small>`)
-                    + fld('Faizin işlendiği gün', `<input id="wz-kesim" type="number" min="1" max="31" step="1" inputmode="numeric" value="${esc(d.kesim)}"><small class="hint">Çoğu bankada ay sonu (30).</small>`) + '</div>'));
-            }
-            return fgrp('Kredi kartı',
-              fld('Banka', bankSelect('wz-banka', d.banka))
-              + fld('Kart adı', `<input id="wz-ad" type="text" maxlength="60" value="${esc(d.ad)}" placeholder="Örn: Bonus, Maximum, World">`)
-              + fld('Toplam kart limiti (₺) *', moneyIn('wz-limit', d.limit) + '<small class="hint">Toplam limit 10.000 TL, kullanılabilir limit 7.000 TL görünüyorsa 10.000 TL yaz.</small>')
-              + fld('Hesap kesim günü *', `<input id="wz-kesim" type="number" min="1" max="31" step="1" inputmode="numeric" value="${esc(d.kesim)}" placeholder="1-31"><small class="hint">Bankanın o dönemin harcamalarını bir borç listesinde topladığı gün. Örn: 25 Kasım ise 25.</small>`)
-              + fld('Son ödeme günü *', `<input id="wz-son" type="number" min="1" max="31" step="1" inputmode="numeric" value="${esc(d.son)}" placeholder="1-31"><small class="hint">Banka uygulamasında borcun son ödeme tarihini bul. Örn: 5 Aralık ise 5.</small>`)
-              + `<details class="wide"><summary>Faiz bilgisi varsa ekle</summary>${fld('Aylık kart faizi (%)', `<input id="wz-faiz" type="text" data-fmt="1" inputmode="decimal" value="${esc(d.faiz)}" placeholder="${trNum(defFaiz('KART'))}"><small class="hint">Boş bırakırsan faiz tahmininde azami oran kullanılır.</small>`)} </details>`);
-          },
-          read: (d, b) => { ['banka', 'ad', 'limit', 'kesim', 'son', 'faiz', 'para'].forEach((k) => { if (b.querySelector('#wz-' + k)) d[k] = wzVal(b, 'wz-' + k); }); const ex = b.querySelector('#wz-kmh-extra'); if (ex) ex.hidden = !(posNum(d.limit) > 0); },
-          live: (d) => {
-            if (d._rr) { d._rr = false; setTimeout(renderWiz, 0); return ''; }
-            if (isK(d)) {
-              const bak = C.r2(posNum(d.para)), lim = posNum(d.limit);
-              if (!(bak > 0)) return lim > 0 ? `Kullanılabilir toplam: <b>${M(lim)}</b>` : '';
-              return `Bakiye: <b class="${bak < 0 ? 'bad-t' : ''}">${bak < 0 ? '−' : ''}${M(Math.abs(bak))}</b>${lim > 0 ? ` · kullanılabilir: <b>${M(Math.max(0, bak) + lim - Math.max(0, -bak))}</b>` : ''}`
-                + (bak < 0 ? `<br>Eksi bakiyeye ayda yaklaşık <b class="bad-t">${M(-bak * (String(d.faiz).trim() !== '' ? num(d.faiz) : defFaiz('KMH')) / 100 * C.vergiFor(S()))}</b> faiz ve vergi işler.` : '');
-            }
-            const k = parseInt(d.kesim), s = parseInt(d.son), out = [];
-            if (dayOk(d.kesim) && dayOk(d.son)) {
-              const ex = C.cardStatementOf(C.isoOf(now()), k, s);
-              out.push(`Bugünkü bir harcama <b>${C.fmtDate(ex.kesimIso)}</b> ekstresine girer, son ödemesi <b>${C.fmtDate(ex.sonOdemeIso)}</b>.`);
-            }
-            if (!dayOk(d.son)) out.push('Son ödeme günü henüz girilmedi.');
-            return out.join('<br>');
-          },
-          validate: (d) => {
-            if (String(d.faiz).trim() !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 15)) return 'Aylık faiz 0 ile 15 arasında olmalı.';
-            if (isK(d)) return '';
-            if (!(posNum(d.limit) > 0)) return 'Toplam kart limitini yaz.';
-            if (!dayOk(d.kesim)) return 'Hesap kesim gününü yazın (1-31).';
-            if (!dayOk(d.son)) return 'Son ödeme günü 1 ile 31 arasında olmalı.';
-            return '';
-          } },
+        wizardChoice('cat','Ne eklemek istiyorsun?', [['KART','Kredi kartı'],['KMH','Vadesiz hesap']], {skip: d => d.catFixed, change: (d,v) => {
+          if (d.cat !== v) Object.assign(d,{kesim:v === 'KMH' ? '30' : '',son:'',limit:'',faiz:'',overdraft:''});
+        }}),
+        entryMethod(), uploadStep(),
+        {id:'account',edit:'Hesabı',soru: d => isK(d) ? 'Hangi banka hesabı?' : 'Hangi kredi kartı?',
+          html: d => fgrp('Hesap',fld('Banka',bankSelect('wz-banka',d.banka))
+            + fld(isK(d) ? 'Hesap adı (isteğe bağlı)' : 'Kart adı (isteğe bağlı)', `<input id="wz-ad" maxlength="60" value="${esc(d.ad)}">`)
+            + (isK(d) ? fld('Hesaptaki para (₺)',moneyIn('wz-para',d.para) + '<small class="hint">Eksi bakiyen varsa 0 yaz. Kullanılan artı parayı hesabı açtıktan sonra harcama olarak ekleyebilirsin.</small>') : '')), read: readDraft },
+        wizardChoice('overdraft','Hesabında artı para limiti var mı?', [['no','Hayır'],['yes','Evet, limitimi gireceğim']], {skip: d => !isK(d)}),
+        {id:'accountTerms',edit:'Koşulları',soru: d => isK(d) ? 'Artı para bilgileri' : 'Kart limiti ve ödeme günleri', skip: d => isK(d) && d.overdraft !== 'yes',
+          html: d => fgrp(isK(d) ? 'Artı para' : 'Kart bilgileri', fld(isK(d) ? 'Artı para limiti (₺) *' : 'Toplam kart limiti (₺) *',moneyIn('wz-limit',d.limit))
+            + dayField('kesim',isK(d) ? 'Faizin işlendiği gün *' : 'Hesap kesim günü *',d.kesim)
+            + (isK(d) ? '' : dayField('son','Son ödeme günü *',d.son))
+            + fld('Aylık faiz (%)', moneyIn('wz-faiz',d.faiz) + '<small class="hint">Boş bırakırsan tahminlerde azami oran kullanılır.</small>')), read:readDraft,
+          validate: d => !posNum(d.limit) ? 'Limiti yaz.' : !dayOk(d.kesim) || (!isK(d) && !dayOk(d.son)) ? 'Günleri 1 ile 31 arasında gir.' : d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 15) ? 'Aylık faiz 0 ile 15 arasında olmalı.' : '' },
+        {soru:d => isK(d) ? 'Hesabı kontrol et' : 'Kartı kontrol et',
+          html:d => reviewRows([['Banka',d.banka],['Ad',d.ad || (isK(d) ? 'Vadesiz hesap' : 'Kredi kartı')],
+            isK(d) && ['Bakiye',M(posNum(d.para))],(!isK(d) || d.overdraft === 'yes') && ['Limit',M(posNum(d.limit))],
+            (!isK(d) || d.overdraft === 'yes') && [isK(d) ? 'Faiz günü' : 'Kesim günü',d.kesim],
+            !isK(d) && ['Son ödeme günü',d.son],(!isK(d) || d.overdraft === 'yes') && ['Aylık faiz',d.faiz !== '' ? pct(num(d.faiz)) : pct(defFaiz(d.cat)) + ' · tahmini']]) + reviewLinks() }
       ],
       save: (d) => {
+        if (isK(d) && d.overdraft !== 'yes') Object.assign(d, { limit: '', faiz: '', kesim: '30' });
         const kmh = isK(d), faiz = String(d.faiz).trim() !== '' ? num(d.faiz) : defFaiz(d.cat);
         const base = { banka: d.banka || 'Diğer', limit: posNum(d.limit), faiz_orani: faiz, hareketler: [] };
         if (kmh) {
@@ -3447,7 +3637,7 @@
       setDb: (d) => { if (sbx.on) sbx.real = d; else { db = d; normalizeDb(); } },
       sanitize: (d) => KeseStore.sanitize(d), persist: (d) => KeseStore.save(d),
       online: () => navigator.onLine,
-      onStatus: (st, info) => { syncState.status = st; syncState.message = st === 'error' ? (info.message || '') : ''; if (info.lastSyncAt) syncState.lastSyncAt = info.lastSyncAt; renderSyncChip(); if (info.pulled && !sbx.on) render(); },
+      onStatus: (st, info) => { syncState.status = st; syncState.message = st === 'error' ? (info.message || '') : ''; if (info.lastSyncAt) syncState.lastSyncAt = info.lastSyncAt; renderSyncChip(); if (info.pulled && !sbx.on) { render(); window.KesePush?.changed(); } },
       onConflict: openConflict,
       onRecovery: () => { if (!$('dlg-newpass').open) $('dlg-newpass').showModal(); },
     });
@@ -3457,6 +3647,13 @@
     const want = new URLSearchParams(location.search).get('auth');
     if (want && syncState.status === 'out') openAuth(want === 'uye' ? 'uye' : 'giris');
     if (want) history.replaceState(null, '', location.pathname);
+  }
+
+  async function clearLocalDevice() {
+    try { await window.KesePush?.reset(); } catch { /* Bağlantı gelince silme isteği yenilenir. */ }
+    KeseStore.resetLocal();
+    db = null;
+    location.reload();
   }
 
   // ---------- Olaylar ----------
@@ -3473,6 +3670,18 @@
   document.addEventListener('click', (ev) => { if (ev.target.closest && ev.target.closest('button, .btn, [data-nav], [data-act], summary, .mcard, .acc, [role="tab"]') && !ev.target.closest('#sim-toggle, #simtab, [data-act="sbx-panel"]')) sfx.play('click'); }, true);
   document.addEventListener('close', (ev) => { if (ev.target && ev.target.tagName === 'DIALOG') sfx.play('close'); }, true);
   document.addEventListener('click', (ev) => {
+    const choice = ev.target.closest('[data-wiz-choice]');
+    if (choice) {
+      const step = wizSteps()[wiz.i];
+      if (step.choose) { step.choose(wiz.d, choice.dataset.wizChoice); wiz.i++; renderWiz(); }
+      return;
+    }
+    const edit = ev.target.closest('[data-wiz-edit]');
+    if (edit) {
+      const index = wizSteps().findIndex(st => st.id === edit.dataset.wizEdit);
+      if (index >= 0) { wiz.i = index; renderWiz(); }
+      return;
+    }
     const wzg = ev.target.closest && ev.target.closest('[data-wzgo]');
     if (wzg) {
       const go = wzg.dataset.wzgo; $('dlg-wiz').close(); wizFromChooser = go !== 'manual' && !wzg.closest('#fab');
@@ -3530,8 +3739,6 @@
       });
       return;
     }
-    if (act === 'import-account') return openSpend({ cat: d.cat, id, document: true });
-    if (act === 'import-loan') return openAddKalan(null, { document: true });
     if (act === 'add-har') { const dl = el.closest('dialog'); if (dl && dl.open && dl.id !== 'dlg-wiz') dl.close(); return openSpend(d.cat ? { cat: d.cat, id: pid } : null); }
     if (act === 'add-spend') return openSpend();
     if (act === 'home-ym') { ui.homeYm = C.ymAdd(ui.homeYm || C.ymOf(new Date()), parseInt(d.d) || 0); return render(); }
@@ -3763,12 +3970,16 @@
         C.toggleGiderPaid(g, ym, false); save('Ödeme kaydı geri alındı.');
       }, payInfo); return;
     }
-    if (act === 'gider-edit') { const g = db.sabit_giderler.find((x) => x.id === id); if (g) { ui.gf = { id: g.id, kategori: g.kategori, ad: g.ad, tutar: g.tutar, gun: g.gun || '', kalan: g.kalan ?? '', sure: g.sure || (g.kalan != null && g.kalan !== '' && g.tutar > 0 ? Math.ceil(Number(g.kalan) / g.tutar - 1e-9) : ''), baslangic: g.baslangic_ym && g.baslangic_ym > C.ymOf(new Date()) ? g.baslangic_ym : '' }; render(); $('gd-ad').focus(); } return; }
-    if (act === 'gider-cancel') { ui.gf = { kategori: 'Kira', ad: '', tutar: '', gun: '', kalan: '', sure: '', id: 0, baslangic: '' }; return render(); }
-    if (act === 'gider-preset') { ui.gf = Object.assign({}, ui.gf, { id: 0, ad: d.ad, kategori: d.k }); render(); $('gd-tutar').focus(); return; }
+    if (['gider-edit', 'gider-new', 'gelir-edit', 'gelir-new'].includes(act)) {
+      if (!ui.ym) openRecurring(act.startsWith('gelir'), id);
+      return;
+    }
+    if (act === 'budget-limit' && !ui.ym) return openSpendingLimit();
+    if (act === 'weekly-insight' && !ui.ym) {
+      el.closest('dialog')?.close();
+      return weeklyInsight();
+    }
     if (act === 'gider-del') { const g = db.sabit_giderler.find((x) => x.id === id); if (!g) return; return removeWithUndo(() => { db.sabit_giderler = db.sabit_giderler.filter((x) => x.id !== id); }, `${nameOf(g.ad, 'Gider')} silindi.`); }
-    if (act === 'gelir-edit') { const g = db.ek_gelirler.find((x) => x.id === id); if (g) { ui.gl = { id: g.id, aciklama: g.aciklama, tutar: g.tutar, baslangic: g.baslangic_ym && g.baslangic_ym > C.ymOf(new Date()) ? g.baslangic_ym : '', sure: g.sure || '' }; render(); $('gl-ad').focus(); } return; }
-    if (act === 'gelir-cancel') { ui.gl = { id: 0, aciklama: '', tutar: '', baslangic: '', sure: '' }; return render(); }
     if (act === 'del-gelir') { const g = db.ek_gelirler.find((x) => x.id === id); if (!g) return; return removeWithUndo(() => { db.ek_gelirler = db.ek_gelirler.filter((x) => x.id !== id); }, `${nameOf(g.aciklama, 'Gelir')} silindi.`); }
     if (act === 'auth-open') return openAuth('giris');
     if (act === 'sync-open') { setView('ayarlar'); return; }
@@ -3783,7 +3994,7 @@
     }
     if (act === 'sign-out-wipe') {
       if (!syncApi) return;
-      askConfirm('Çıkış yapılacak ve BU CİHAZDAKİ tüm Kese verileri silinecek (hesabınızdaki kopya kalır).', 'Çıkış yap ve sil').then((ok) => { if (ok) syncApi.signOut().then(() => { KeseStore.resetLocal(); db = null; location.reload(); }); });
+      askConfirm('Çıkış yapılacak ve BU CİHAZDAKİ tüm Kese verileri silinecek (hesabınızdaki kopya kalır).', 'Çıkış yap ve sil').then((ok) => { if (ok) syncApi.signOut().then(() => { clearLocalDevice(); }); });
       return;
     }
     if (act === 'delete-account') {
@@ -3798,7 +4009,7 @@
     if (act === 'cf-later') { $('dlg-conflict').close(); return; }
     if (act === 'auth-tab') { setAuthMode(d.m); return; }
     if (act === 'auth-google') { if (syncApi) syncApi.signInWithGoogle().then((r) => { if (!r.ok) { $('au-msg').textContent = r.message; } }); return; }
-    if (act === 'wipe') { if (sbx.on) return toast('Önce simülasyondan çıkın.', { err: true }); askConfirm('Bu cihazdaki TÜM Kese verileriniz kalıcı olarak silinecek ve geri alınamaz. Önce “Yedek indir” ile yedek aldığınızdan emin olun.', 'Tüm verilerimi sil', 'Tüm veriler silinsin mi?').then((ok) => { if (ok) { KeseStore.resetLocal(); db = null; location.reload(); } }); return; }
+    if (act === 'wipe') { if (sbx.on) return toast('Önce simülasyondan çıkın.', { err: true }); askConfirm('Bu cihazdaki TÜM Kese verileriniz kalıcı olarak silinecek ve geri alınamaz. Önce “Yedek indir” ile yedek aldığınızdan emin olun.', 'Tüm verilerimi sil', 'Tüm veriler silinsin mi?').then((ok) => { if (ok) { clearLocalDevice(); } }); return; }
     if (act === 'refresh-rates') { el.disabled = true; el.textContent = 'Güncelleniyor…'; return loadRates(true); }
     if (act === 'import') { if (sbx.on) return toast('Simülasyon modundayken yedek yüklenemez. Önce simülasyondan çıkın.', { err: true }); return $('imp-file').click(); }
     if (act === 'export') {
@@ -3830,9 +4041,6 @@
     if (t.closest && t.closest('#dlg-kapat')) { onKapatChange(t); return; }
     if (t.dataset.act === 'pick') { if (t.checked) ui.picked.add(t.dataset.k); else ui.picked.delete(t.dataset.k); return; }
     if (t.dataset.giderpaid) { if (ui.ym) return; const g = db.sabit_giderler.find((x) => x.id === parseInt(t.dataset.giderpaid)); if (g) { C.toggleGiderPaid(g, C.ymOf(now()), t.checked); save(); } return; }
-    if (t.dataset.gl) { ui.gl[t.dataset.gl] = t.value; return; }
-    if (t.dataset.gf === 'baslangic') { ui.gf.baslangic = t.value; return; }
-    if (t.dataset.gf === 'kategori') { ui.gf.kategori = t.value; if (t.value !== 'Elden borç') ui.gf.kalan = ''; return render(); }
     if (t.dataset.spn) { ui.spN = parseInt(t.value) || 0; return render(); }
     if (t.dataset.takla) { ui.takla[t.dataset.takla] = t.value; ui.spOpen.taklaset = true; return render(); }
     if (t.dataset.plan) { ui.plan[t.dataset.plan] = t.value; ui.spOpen.plset = true; return render(); }
@@ -3858,8 +4066,6 @@
       return;
     }
     if (ev.target.closest && ev.target.closest('#dlg-kapat')) { if (ev.target.dataset.kpT) { kp.tutar[ev.target.dataset.kpT] = num(ev.target.value); kapatLive(); } else if (id === 'kp-masraf') kapatLive(); return; }
-    if (ev.target.dataset.gf) { ui.gf[ev.target.dataset.gf] = ev.target.value; return; }
-    if (ev.target.dataset.gl) { ui.gl[ev.target.dataset.gl] = ev.target.value; return; }
     if (id.startsWith('har-')) {
       if (id === 'har-ilk') har.ilkManual = true;
       if (id === 'har-tarih' || id === 'har-odenen' || id === 'har-n') syncHarMonth();
@@ -3874,46 +4080,6 @@
       gecLive();
     } else if (id === 'kismi-tutar') {
       kismiLive();
-    }
-  });
-  document.addEventListener('submit', (ev) => {
-    if (ev.target.id === 'form-gider') {
-      ev.preventDefault();
-      if (ui.ym) return;
-      try {
-      const g = ui.gf, tutar = num(g.tutar), err = $('gd-err');
-      const elden = g.kategori === 'Elden borç', gunRaw = String(g.gun ?? '').trim(), sureRaw = String(g.sure ?? '').trim(), kalanRaw = String(g.kalan ?? '').trim();
-      const msg = !(tutar > 0) ? 'Aylık tutarı girin.'
-        : gunRaw !== '' && !(/^\d+$/.test(gunRaw) && Number(gunRaw) >= 1 && Number(gunRaw) <= 31) ? 'Ödeme günü 1 ile 31 arasında olmalı (boş bırakabilirsiniz).'
-        : sureRaw !== '' && !(/^\d+$/.test(sureRaw) && Number(sureRaw) >= 1 && Number(sureRaw) <= 360) ? 'Taksit sayısı 1 ile 360 arasında olmalı (sürekliyse boş bırakın).'
-        : elden && kalanRaw !== '' && !(num(kalanRaw) >= 0) ? 'Kalan borcu rakamla yazın.' : '';
-      err.textContent = msg; if (msg) return;
-      const gun = gunRaw === '' ? 0 : Number(gunRaw);
-      const nTaksit = sureRaw === '' ? 0 : Number(sureRaw);
-      let kalan = elden && String(g.kalan).trim() !== '' && Number.isFinite(num(g.kalan)) ? Math.max(0, num(g.kalan)) : null;
-      if (elden && kalan == null && nTaksit > 0) kalan = C.r2(tutar * nTaksit);
-      const rec = { ad: String(g.ad).trim() || g.kategori, kategori: g.kategori, tutar, gun, sure: elden ? 0 : nTaksit };
-      if (kalan != null) rec.kalan = kalan;
-      if (g.id) { const x = db.sabit_giderler.find((q) => q.id === g.id); Object.assign(x, rec); if (g.baslangic) x.baslangic_ym = g.baslangic; if (kalan == null) delete x.kalan; }
-      else db.sabit_giderler.push(Object.assign({ id: nextId(db.sabit_giderler, 0), baslangic_ym: g.baslangic || C.ymOf(now()), odendi_aylar: [] }, rec));
-      ui.gf = { kategori: g.kategori, ad: '', tutar: '', gun: '', kalan: '', sure: '', id: 0, baslangic: '' };
-      save('Gider kaydedildi.'); return;
-      } catch (e) { toast('Gider eklenemedi: ' + e.message, { err: true }); return; }
-    }
-    if (ev.target.id === 'form-gelir') {
-      ev.preventDefault();
-      if (ui.ym) return;
-      const g = ui.gl, tutar = num(g.tutar);
-      if (!setErr('gl-tutar', 'gl-err', !(tutar > 0) ? 'Geçerli bir tutar girin.' : '')) return;
-      const sureRaw = String(g.sure ?? '').trim();
-      if (!setErr('gl-sure', 'gl-sure-err', sureRaw !== '' && !(/^\d+$/.test(sureRaw) && Number(sureRaw) <= 600) ? 'Ay sayısını tam sayı yazın (sürekliyse boş bırakın).' : '')) return;
-      const sure = sureRaw === '' ? 0 : Number(sureRaw);
-      const rec = { aciklama: String(g.aciklama).trim() || 'Gelir', tutar, sure };
-      if (g.baslangic) rec.baslangic_ym = g.baslangic; else if (sure > 0) rec.baslangic_ym = C.ymOf(now());
-      if (g.id) { const x = db.ek_gelirler.find((q) => q.id === g.id); Object.assign(x, rec); if (!rec.baslangic_ym) delete x.baslangic_ym; if (!sure) delete x.sure; }
-      else { if (!sure) delete rec.sure; db.ek_gelirler.push(Object.assign({ id: nextId(db.ek_gelirler, 0) }, rec)); }
-      ui.gl = { id: 0, aciklama: '', tutar: '', baslangic: '', sure: '' };
-      save('Gelir kaydedildi.');
     }
   });
   $('form-hesap').addEventListener('submit', submitHesap);
@@ -3965,6 +4131,7 @@
 
   (async function init() {
     try { await KeseStore.init(); await load(); } catch { showRecovery(); return; }
+    window.KesePush?.init({db: () => db, calc: C, sim: () => sbx.on, save});
     document.body.classList.toggle('mode-local', KeseStore.mode === 'local');
     {
       const go = new URLSearchParams(location.search).get('go');
@@ -3973,11 +4140,18 @@
       ui.view = initial;
     }
     render();
+    const entry = new URL(location.href);
+    if (entry.searchParams.has('reminder')) {
+      const kind = entry.searchParams.get('reminder');
+      entry.searchParams.delete('reminder');
+      history.replaceState(history.state, '', entry);
+      requestReminder(kind);
+    } else showPendingReminder();
     loadRates(false);
     initSync().catch(() => { /* hesap özellikleri açılamazsa uygulama yerel çalışır */ });
     // Çevrimdışı çalışma ve "uygulama gibi yükle" için service worker (yalnız https veya localhost)
     if (!document.querySelector('meta[name="kese-preview"]') && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') && KeseStore.mode === 'local') {
-      navigator.serviceWorker.register('sw.js').catch(() => { /* kayıt başarısızsa uygulama yine çalışır */ });
+      navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => window.KesePush?.reconcile()).catch(() => { /* kayıt başarısızsa uygulama yine çalışır */ });
     }
   })();
 })();
