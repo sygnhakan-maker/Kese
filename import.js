@@ -335,7 +335,7 @@
       if (r.aylik > 0) r.bulunan.push(`Aylık taksit: ${para(r.aylik)}`);
       if (r.kalan >= 1) r.bulunan.push(`Kalan taksit: ${r.kalan}`);
       if (r.sonraki) r.bulunan.push(`Sıradaki taksit: ${tr(r.sonraki)}`);
-      if (r.toplam) r.bulunan.push(`Toplam taksit: ${r.toplam}`);
+      if (r.toplam) r.bulunan.push(`Toplam taksit sayısı: ${r.toplam}`);
       if (r.ana) r.bulunan.push(`Çekilen tutar: ${para(r.ana)}`);
     } else if (r.kind === 'kart') {
       if (r.limit) r.bulunan.push(`${r.limitTahmin ? 'Tahmini toplam limit' : 'Toplam limit'}: ${para(r.limit)}`);

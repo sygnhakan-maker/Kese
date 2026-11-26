@@ -1088,7 +1088,7 @@
     const buAy = C.sum(C.unpaid(h).filter((t) => t.ym <= C.ymOf(now())), C.installmentBalance);
     const buAyOd = C.sum(h.taksitler.filter((t) => t.odendi && !t.kapatildi && t.ym === C.ymOf(now())), (t) => t.tutar);
     return `<tr class="click ${open ? 'sel' : ''}" data-act="toggle" data-key="${key}">
-      <td><b>${esc(h.aciklama)}</b><div class="muted">${esc(h.tur)}</div></td><td>${C.fmtDate(h.tarih)}</td>
+      <td><b>${esc(h.aciklama)}</b><div class="muted">${esc(h.tur)}</div></td><td>${h.tarih_tahmini ? C.fmtYM(h.tarih.slice(0, 7)) + ' (tahmini)' : C.fmtDate(h.tarih)}</td>
       <td class="n">${M(h.ana_para)}</td><td class="n"><b>${M(kalan)}</b></td><td class="n ${faizYuku > 0 ? 'bad-t' : 'muted'}">${M(faizYuku)}</td><td class="n">${od}/${h.toplam_taksit}</td>${buCell(buAy, buAyOd)}
       <td class="n">${kapatBtn}${btns}</td></tr>`;
   }
@@ -2174,6 +2174,7 @@
     });
     const rec = { id: iid || nextId(parent.hareketler, 1000), tur, aciklama: $('har-ack').value.trim() || tur, tarih: $('har-tarih').value || C.isoOf(now()),
       ilk_taksit_ym: $('har-ilk').value, ana_para: c.ana, faiz_orani: c.faiz, toplam_geri_odeme: c.toplam || c.ana, toplam_taksit: c.n, taksitler };
+    if (existing?.tarih_tahmini && rec.tarih === existing.tarih) rec.tarih_tahmini = true;
     const L = limitLeft(parent, iid), need = C.remainingPrincipal(rec);
     if (L && need > L.kalan + 0.005) { setErr('har-tutar', 'har-tutar-err', `Kalan limitiniz ${M(Math.max(0, L.kalan))}; ${M(need)} tutarındaki kullanım limiti aşıyor, kaydedilmedi.`); return; }
     if (existing) parent.hareketler[parent.hareketler.indexOf(existing)] = rec; else parent.hareketler.push(rec);
@@ -2343,7 +2344,7 @@
         if (it.aylik > 0) it.bulunan.push(`Aylık taksit: ${M(it.aylik)}`);
         if (it.kalan >= 1) it.bulunan.push(`Kalan taksit: ${it.kalan}`);
         if (it.sonraki) it.bulunan.push(`Sıradaki taksit: ${C.fmtDate(it.sonraki)}`);
-        if (it.toplam) it.bulunan.push(`Toplam taksit: ${it.toplam}`);
+        if (it.toplam) it.bulunan.push(`Toplam taksit sayısı: ${it.toplam}`);
         if (it.ana) it.bulunan.push(`Çekilen tutar: ${M(it.ana)}`);
       } else {
         if (it.limit > 0) it.bulunan.push(`Toplam limit: ${M(it.limit)}`);
@@ -2579,9 +2580,24 @@
       .concat(db.kmh_hesaplar.map((a) => ({ key: srcKey('KMH', a.id), cat: 'KMH', acc: a, ad: `${a.banka && a.banka !== 'Diğer' ? a.banka + ' · ' : ''}${a.hesap_adi}`, sub: `Vadesiz hesap · bakiye ${C.hesapBakiye(a) < 0 ? '−' : ''}${M(Math.abs(C.hesapBakiye(a)))}${a.limit > 0 ? ' · artı para ' + M(a.limit) : ''}` })));
   }
   const nextDueIso = (gun) => { const t = now(), ym = C.ymOf(t), iso = C.dueDate(ym, gun || 25); return iso >= C.isoOf(t) ? iso : C.dueDate(C.ymAdd(ym, 1), gun || 25); };
+  const fromCardInstallment = d => d.src.startsWith('KART:') && d.tur === 'taksit' && d.bil === 'taksit';
+  function inferredCardDates(d, card) {
+    const today = C.isoOf(now()), cut = card.kesim_gunu || 15, due = card.son_odeme_gunu || 25;
+    const paid = Number(d.odenen) || 0;
+    const nextMonth = d.vadeAy || (paid ? nextDueIso(due).slice(0, 7) : C.cardStatementOf(today, cut, due).odemeYm);
+    const firstMonth = C.ymAdd(nextMonth, -paid);
+    const statementMonth = C.ymAdd(firstMonth, due <= cut ? -1 : 0);
+    const end = C.dueDate(statementMonth, cut);
+    const previousCut = C.dueDate(C.ymAdd(statementMonth, -1), cut);
+    const startDate = new Date(previousCut + 'T12:00:00');
+    startDate.setDate(startDate.getDate() + 1);
+    const start = C.isoOf(startDate);
+    return { nextMonth, firstMonth, start, end, estimate: end < today ? end : today };
+  }
   function spendPlan(d) {
     const src = spendSources().find((x) => x.key === d.src); if (!src) return null;
-    const today = C.isoOf(now()), tarih = d.tarih || today;
+    const dates = fromCardInstallment(d) ? inferredCardDates(d, src.acc) : null;
+    const today = C.isoOf(now()), tarih = dates?.estimate || d.tarih || today;
     if (src.cat === 'KMH' && d.tur !== 'avans') {
       const a = src.acc, tutar = posNum(d.tutar), yeni = C.r2(C.hesapBakiye(a) - tutar), lim = Number(a.limit) || 0;
       const bos = C.r2(Math.max(0, C.hesapBakiye(a)) + Math.max(0, lim - C.hesapKullanilan(a)));
@@ -2608,9 +2624,10 @@
     let ana, toplam;
     if (!tek && d.bil === 'taksit') { const a = posNum(d.aylik); toplam = C.r2(a * n); ana = C.r2(C.annuityPrincipal(a, faiz, n, v)); }
     else { ana = posNum(d.tutar); toplam = tek ? ana : C.annuityTotal(ana, faiz, n, v); }
-    const devam = !tek && d.mod === 'devam', odenen = !tek ? Math.min(n - 1, Math.max(0, parseInt(d.odenen) || 0)) : 0;
+    const devam = !tek && (dates ? Number(d.odenen) > 0 || !!d.vadeAy : d.mod === 'devam'), odenen = !tek ? Math.min(n - 1, Math.max(0, parseInt(d.odenen) || 0)) : 0;
     let ilkYm, ex = null, gun = devam && Number(d.sonraki?.slice(8)) || k.son_odeme_gunu || 25;
-    if (devam) { const sn = d.sonraki || nextDueIso(gun); ilkYm = C.ymAdd(sn.slice(0, 7), -odenen); }
+    if (dates) { ilkYm = dates.firstMonth; gun = k.son_odeme_gunu || 25; ex = C.cardStatementOf(tarih, k.kesim_gunu || 15, gun); }
+    else if (devam) { const sn = d.sonraki || nextDueIso(gun); ilkYm = C.ymAdd(sn.slice(0, 7), -odenen); }
     else { ex = C.cardStatementOf(tarih, k.kesim_gunu || 15, gun); ilkYm = ex.odemeYm; }
     const taksitler = C.buildSchedule({ toplam, n, ilkYm, gun, odenenSayisi: odenen });
     const gecmis = devam ? 0 : taksitler.filter((t) => !t.odendi && t.vade_tarihi < today).length;
@@ -2662,14 +2679,14 @@
       const p = spendPlan(d);
       if (!p || !(p.tutar > 0)) return 'Tutarı gir.';
       if (p.kmh && d.tarih > C.isoOf(now())) return 'Hesap harcamasının tarihi gelecekte olamaz.';
-      return openingStatementConflict(p) || (p.asim && !p.devam ? 'Kullanılabilir bakiye veya limit yetersiz.' : '');
+      return openingStatementConflict(p) || (p.asim && (!p.devam || (fromCardInstallment(d) && !p.odenen)) ? 'Kullanılabilir bakiye veya limit yetersiz.' : '');
     }
     openWiz({
       baslik: 'Harcama ekle', saveLabel: 'Kaydet',
       receipt: true,
       reminder: !!pre?.reminder,
       localDocument: true,
-      init: () => ({ src: pick, srcFixed: !!pre?.cat, tur: 'tek', mod: 'yeni', bil: 'tutar', n: '', tutar: pre?.demo ? '1.000' : '', aylik: '', tarih: C.isoOf(now()), ack: pre?.demo ? 'Örnek alışveriş' : '', faiz: '', odenen: '0', sonraki: '', gecmisOdendi: false }),
+      init: () => ({ src: pick, srcFixed: !!pre?.cat, tur: 'tek', mod: 'yeni', bil: 'tutar', n: '', kalan: '', vadeAy: '', tutar: pre?.demo ? '1.000' : '', aylik: '', tarih: C.isoOf(now()), ack: pre?.demo ? 'Örnek alışveriş' : '', faiz: '', odenen: '0', sonraki: '', gecmisOdendi: false }),
       importer: (d, receipt) => {
         if (!receipt.tutar) return { ok: false, msg: 'Belgede toplam tutar bulunamadı. Daha net bir fotoğraf seçebilir veya tutarı elle yazabilirsin.' };
         d.tutar = trNum(receipt.tutar);
@@ -2686,20 +2703,49 @@
         wizardChoice('src', 'Hangi karttan veya hesaptan?', srcs.map(x => [x.key, x.ad, x.sub]), { skip: d => d.srcFixed || srcs.length === 1, change: (d, v) => { if (d.src !== v) d.tur = 'tek'; } }),
         entryMethod(), uploadStep(),
         wizardChoice('tur', 'Hangi işlem türü?', d => isK(d) ? [['tek', 'Hesap harcaması'], ['avans', 'Taksitli nakit avans']] : SPEND_TUR, { edit: 'İşlem türünü', skip: d => isK(d) && !kmhLim(d) }),
-        wizardChoice('bil', 'Hangi tutarı biliyorsun?', [['tutar','İşlem tutarı'],['taksit','Aylık taksit']], { skip: d => !tak(d) }),
+        wizardChoice('bil', 'Hangi tutarı biliyorsun?', [['tutar','İşlem tutarı'],['taksit','Bir taksidin tutarı']], { skip: d => !tak(d) }),
         { id: 'amount', edit: 'İşlemi', soru: 'Harcama bilgileri',
-          html: d => kartInfo(d) + fgrp('İşlem', (tak(d) && d.bil === 'taksit' ? fld('Aylık taksit (₺) *', moneyIn('wz-aylik', d.aylik)) : fld('İşlem tutarı (₺) *', moneyIn('wz-tutar', d.tutar)))
-            + dateField('tarih','İşlem tarihi *', d.tarih) + fld('Açıklama (isteğe bağlı)', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`)),
+          html: d => kartInfo(d) + fgrp('İşlem', (tak(d) && d.bil === 'taksit' ? fld('Bir taksidin tutarı (₺) *', moneyIn('wz-aylik', d.aylik)) : fld('İşlem tutarı (₺) *', moneyIn('wz-tutar', d.tutar)))
+            + (fromCardInstallment(d) ? '' : dateField('tarih','İşlem tarihi *', d.tarih)) + fld('Açıklama (isteğe bağlı)', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`)),
           read: readDraft,
-          validate: d => !posNum(tak(d) && d.bil === 'taksit' ? d.aylik : d.tutar) ? 'Tutarı gir.' : !d.tarih ? 'İşlem tarihini seç.' : !tak(d) ? validateSpend(d) : '' },
-        { id: 'schedule', edit: 'Planı', soru: 'Taksit planı', skip: d => !tak(d),
-          html: d => fgrp('Ödeme planı', dayField('n','Toplam taksit *',d.n,60,2)
+          validate: d => !posNum(tak(d) && d.bil === 'taksit' ? d.aylik : d.tutar) ? 'Tutarı gir.' : !fromCardInstallment(d) && !d.tarih ? 'İşlem tarihini seç.' : !tak(d) ? validateSpend(d) : '' },
+        { id: 'counts', edit: 'Taksit sayılarını', soru: 'Taksitlerin ne kadarı kaldı?', skip: d => !fromCardInstallment(d),
+          html: d => fgrp('Taksit sayıları',
+            dayField('odenen','Kaç taksit ödedin?',d.odenen,59,0)
+            + dayField('kalan','Kaç taksit kaldı?',d.kalan,60)),
+          read: (d,b) => { readDraft(d,b); d.n = String(Number(d.odenen) + Number(d.kalan)); },
+          validate: d => !boundedInt(d.odenen,0,59) ? 'Ödediğin taksit sayısını gir. Henüz ödemediysen 0 yaz.' : !boundedInt(d.kalan,1,60) ? 'Kalan taksit sayısını 1 ile 60 arasında gir.' : !boundedInt(d.n,2,60) ? 'Ödenen ve kalan taksitlerin toplamı 2 ile 60 arasında olmalı.' : '',
+          live: d => boundedInt(d.odenen,0,59) && boundedInt(d.kalan,1,60) ? `Toplam taksit sayısı: <b>${d.n} adet</b> · Kalan ödeme: <b>${M(C.r2(posNum(d.aylik) * Number(d.kalan)))}</b>` : '' },
+        { id: 'schedule', edit: 'Planı', soru: 'Taksit planı', skip: d => !tak(d) || fromCardInstallment(d),
+          html: d => fgrp('Ödeme planı', dayField('n','Toplam taksit sayısı (adet) *',d.n,60,2)
             + dayField('odenen','Ödenen taksit',d.odenen,59,0)
             + dateField('sonraki','Sıradaki vade (isteğe bağlı)',d.sonraki)
             + fld('Aylık faiz (%)', moneyIn('wz-faiz',d.faiz) + `<small class="hint">Faizsiz taksit için 0 yaz. Boş bırakırsan %${trNum(spendRate({...d, faiz:''},srcOf(d)))} ile tahmin edilir.</small>`)),
           read: (d,b) => { readDraft(d,b); d.mod = d.sonraki ? 'devam' : 'yeni'; },
           validate: d => !boundedInt(d.n,2,60) ? 'Toplam taksiti 2 ile 60 arasında gir.' : !boundedInt(d.odenen || 0,0,Number(d.n)-1) ? 'Ödenen taksit, toplam taksitten az olmalı.' : d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 20) ? 'Aylık faizi 0 ile 20 arasında gir.' : validateSpend(d) },
-        { soru: 'Harcamayı kontrol et', html: d => kartInfo(d) + reviewRows([['İşlem tarihi',C.fmtDate(d.tarih)], d.ack && ['Açıklama',d.ack]]) + summary(d)
+        { id: 'cardReview', soru: 'Ödeme planın doğru mu?', skip: d => !fromCardInstallment(d),
+          html: d => kartInfo(d) + moreBox(!!d.vadeAy || d.faiz !== '', fld('Sıradaki taksidin ödeme ayı', `<input type="month" id="wz-vadeAy" value="${esc(d.vadeAy)}"><small>Ekstrendeki ay farklıysa seç.</small>`)
+            + faizField(d,'Faizsiz alışveriş için 0 yaz.')) + reviewLinks(),
+          read: readDraft,
+          liveTop: d => {
+            const p = spendPlan(d), dates = inferredCardDates(d,p.src.acc);
+            if (dates.start > C.isoOf(now())) return 'Bu ödeme ayı harcamayı geleceğe taşıyor. Ekstrendeki ödeme ayını kontrol et.';
+            return reviewRows([
+              ['Bir taksidin tutarı', M(p.aylik)], ['Taksit sayısı', `${d.odenen} ödendi · ${d.kalan} kaldı`],
+              ['Kalan ödeme', M(p.kalanBorc)], ['Sıradaki ödeme', C.fmtDate(p.sonraki.vade_tarihi)],
+              ['Son ödeme', C.fmtDate(p.taksitler[p.n - 1].vade_tarihi)],
+              ['Tahmini harcama ayı', C.fmtYM(dates.estimate.slice(0,7))],
+
+              ...(d.ack ? [['Açıklama',d.ack]] : [])
+            ]) + `<details><summary>Tahmin ve taksit dökümü</summary><p>Kartın hesap kesimine göre alışveriş ${C.fmtDate(dates.start)} ile ${C.fmtDate(dates.estimate)} arasında yapılmış olabilir.</p>${reviewRows([
+              ['Aylık faiz', pct(p.faiz) + (d.faiz === '' ? ' · tahmini' : '')],
+              ['Toplam geri ödeme', M(p.toplam)],
+              ['Tahmini kalan ana para', M(C.r2(C.annuityPrincipal(p.aylik,p.faiz,Number(d.kalan),C.vergiFor(S()))))],
+              ['Tahmini kalan faiz ve vergi', M(Math.max(0,C.r2(p.kalanBorc - C.annuityPrincipal(p.aylik,p.faiz,Number(d.kalan),C.vergiFor(S())))))]
+            ])}<ol>${p.taksitler.map(t => `<li>${C.fmtDate(t.vade_tarihi)} · ${M(t.tutar)} · ${t.odendi ? 'Ödendi' : 'Ödenecek'}</li>`).join('')}</ol></details>`;
+          },
+          validate: d => inferredCardDates(d,srcOf(d).acc).start > C.isoOf(now()) ? 'Bu ödeme ayı harcamayı geleceğe taşıyor. Ekstrendeki ödeme ayını kontrol et.' : d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 20) ? 'Aylık faizi 0 ile 20 arasında gir.' : validateSpend(d) },
+        { soru: 'Harcamayı kontrol et', skip: fromCardInstallment, html: d => kartInfo(d) + reviewRows([['İşlem tarihi',C.fmtDate(d.tarih)], d.ack && ['Açıklama',d.ack]]) + summary(d)
             + (tak(d) ? `<details><summary>Ödeme tarihleri</summary><ul class="list compact">${spendPlan(d).taksitler.map(t => `<li><span>${t.no}. taksit · ${C.fmtDate(t.vade_tarihi)}</span><b>${M(t.tutar)}${t.odendi ? ' · Ödendi' : ''}</b></li>`).join('')}</ul></details>` : '') + reviewLinks(), validate: validateSpend }
       ],
       save: (d) => {
@@ -2717,7 +2763,7 @@
           return;
         }
         const k = p.src.acc, tur = d.tur === 'tek' ? 'Tek Çekim Harcama' : d.tur === 'avans' ? 'Taksitli Nakit Avans' : 'Taksitli Alışveriş';
-        k.hareketler.push({ id: nextId(k.hareketler, 1000), tur, aciklama: d.ack.trim() || tur, tarih: d.tarih, ilk_taksit_ym: p.ilkYm, ana_para: p.ana, faiz_orani: p.faiz, toplam_geri_odeme: p.toplam, toplam_taksit: p.n, taksitler: p.taksitler });
+        k.hareketler.push({ id: nextId(k.hareketler, 1000), tur, aciklama: d.ack.trim() || tur, tarih: p.tarih, ...(fromCardInstallment(d) ? { tarih_tahmini: true } : {}), ilk_taksit_ym: p.ilkYm, ana_para: p.ana, faiz_orani: p.faiz, toplam_geri_odeme: p.toplam, toplam_taksit: p.n, taksitler: p.taksitler });
         ui.selKart = k.id; save(p.devam ? `${tur} eklendi; ${p.n - p.odenen} taksit kaldı.` : `Harcama ${C.fmtDate(p.ex.kesimIso)} ekstresine eklendi.`);
       },
     });

@@ -471,7 +471,7 @@
         if (aylik != null && aylik > 0) bulunan.push(`Aylık taksit: ${fmtMoneyTr(aylik)}`);
         if (kalan != null && kalan >= 1) bulunan.push(`Kalan taksit: ${kalan}`);
         if (sonrakiTr) bulunan.push(`Sıradaki taksit: ${sonrakiTr}`);
-        if (toplam != null && toplam >= 1) bulunan.push(`Toplam taksit: ${toplam}`);
+        if (toplam != null && toplam >= 1) bulunan.push(`Toplam taksit sayısı: ${toplam}`);
         if (kalanBorc != null && kalanBorc > 0) bulunan.push(`Kalan borç: ${fmtMoneyTr(kalanBorc)}`);
       } else {
         if (kalanBorc != null && kalanBorc > 0) bulunan.push(`Güncel borç: ${fmtMoneyTr(kalanBorc)}`);
