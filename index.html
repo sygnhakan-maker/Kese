@@ -60,12 +60,16 @@
         <button type="button" data-nav="butce"><i data-ic="wallet"></i>Bütçem</button>
       </nav>
       <div class="fab-actions">
-        <button type="button" data-wzgo="harcama"><i data-ic="plus"></i>Harcama</button>
+        <button type="button" data-wzgo="harcama"><i data-ic="plus"></i>Harcama ekle</button>
+        <button type="button" data-act="gelir-new"><i data-ic="wallet"></i>Gelir ekle</button>
+        <button type="button" data-act="gider-new"><i data-ic="list"></i>Sabit gider ekle</button>
+        <button type="button" data-menu-target="tools"><i data-ic="list"></i>Tüm araçlar</button>
         <button type="button" data-menu-target="deposit"><i data-ic="wallet"></i>Para girişi</button>
         <button type="button" data-menu-target="debt"><i data-ic="bank"></i>Borç ekle</button>
         <button type="button" data-menu-target="account"><i data-ic="card"></i>Kart/hesap ekle</button>
       </div>
     </div>
+    <div data-menu-page="tools" hidden><h2>Tüm araçlar</h2><div id="fab-tools"></div></div>
     <div data-menu-page="deposit" hidden><h2>Para girişi</h2><div id="deposit-accounts"></div></div>
     <div data-menu-page="debt" hidden><h2>Borç ekle</h2>
       <button type="button" data-wzgo="kalan">Banka kredisi / kredili ürün</button>

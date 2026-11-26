@@ -442,6 +442,11 @@
   });
   // Araçlar'daki aç/kapat
   document.addEventListener('click', (e) => {
+    if (e.target.closest?.('[data-act="pet-games"]')) {
+      const opener = e.target.closest('button');
+      window.openKeseGames({ mascot: KESE_SVG, play, restoreFocus: () => (opener.closest('#fab') ? menuButton : opener).focus() });
+      return;
+    }
     if (e.target.closest?.('[data-act="pet-hide"]')) { if (pet.on) pet.hideSeek(); return; }
     const t = e.target.closest && e.target.closest('[data-act="pet-toggle"]'); if (!t) return;
     const on = pet.toggle(); const b = t.querySelector('b'); if (b) b.textContent = on ? 'Kese arkadaşın: Açık' : 'Kese arkadaşın: Kapalı';

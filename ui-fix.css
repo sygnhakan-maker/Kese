@@ -523,3 +523,14 @@ div.wl-step { cursor: default; grid-template-columns: 44px minmax(0, 1fr); }
 .plan-breakdown { margin-bottom:12px; padding:5px 12px; border-radius:8px; background:var(--panel2); font-size:.85rem; }
 .plan-links { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-start; }
 .plan-budget[open] { flex-basis:100%; }
+
+#fab-tools .tool-card { min-width: 0; justify-content: flex-start; }
+#fab-tools .tool-card small { display: none; }
+dialog.pet-games[open] { display: flex; flex-direction: column; overflow: hidden; }
+dialog.pet-games .game-body { min-height: 0; overflow-y: auto; }
+dialog.pet-games footer, dialog.ai-dlg footer { flex: none; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+dialog.pet-games footer button, dialog.ai-dlg footer button { width: 100%; min-height: 44px; }
+dialog.ai-dlg form.ai-composer { padding-bottom: 8px; }
+@media (max-width: 860px) {
+  dialog.ai-dlg .ai-head, dialog.pet-games header { padding-top: calc(12px + env(safe-area-inset-top)) !important; }
+}

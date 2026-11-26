@@ -37,7 +37,7 @@
     list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
     chart: '<path d="M4 20V4M4 20h16M8 16v-5M12.5 16V8M17 16v-8"/>',
   home: '<path d="M4 11l8-7 8 7M6 10v10h12V10M10 20v-6h4v6"/>',
-    gear: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/>',
+    gear: '<path d="M10 2h4l.6 2.6 1.5.7 2.4-1.1 2.8 2.8-1.2 2.4.7 1.6 2.2.5v3l-2.5.6-.7 1.5 1.1 2.3-2.8 2.8-2.4-1.1-1.5.6-.6 2.2H10l-.6-2.4-1.5-.6-2.4 1.1-2.8-2.8 1.2-2.4-.7-1.5L1 14v-3l2.4-.6.7-1.6L3 6.5l2.8-2.8 2.4 1.1 1.3-.6Z"/><circle cx="12" cy="12" r="3.3"/>',
     bell: '<path d="M6 17.5V11a6 6 0 0 1 12 0v6.5l1.5 1.5h-15zM10 21h4"/>',
     wallet: '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3M4 7.5V18a2 2 0 0 0 2 2h13.5V8H6.5A2.5 2.5 0 0 1 4 7.5zM16 14h.01"/>',
     doc: '<path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4M10 12h5M10 16h5"/>',
@@ -312,6 +312,7 @@
   const NAVIC = { ozet: 'home', pano: 'chart', butce: 'wallet', borclar: 'card', maliyet: 'trend', takvim: 'cal', oneriler: 'bell', ayarlar: 'gear', dahafazla: 'list' };
   const subToolViews = new Set(['butce', 'oneriler', 'maliyet', 'pano', 'ayarlar']);
   function renderNav(sum) {
+    $('fab-tools').innerHTML = toolCards();
     const active = subToolViews.has(ui.view) ? 'dahafazla' : ui.view;
     const items = [
       ['ozet', 'Bugün', ''],
@@ -330,7 +331,7 @@
       `<button type="button" data-nav="${k}" title="${{ borclar: 'Hesaplarım', takvim: 'Ödeme takvimim' }[k] || l}" ${active === k ? 'aria-current="page"' : ''}>${icon(NAVIC[k])}<span class="dl">${l}</span>${b ? `<span class="badge" aria-label="Geciken ödeme var">${b}</span>` : ''}</button>`).join('');
   }
 
-  function viewMore() {
+  function toolCards() {
     const card = (attr, ic, title, desc) => `<button type="button" class="btn tool-card" ${attr}>${icon(ic)}<span><b>${title}</b><small>${desc}</small></span></button>`;
     const cards = [
       card('data-act="ai-open"', 'spark', 'Kese Asistan (Yapay Zeka)', 'Borçlarını sor, kişiselleştirilmiş ödeme stratejisi al.'),
@@ -341,6 +342,12 @@
       cards.push(card('data-act="sbx-toggle"', 'flask', sbx.on ? 'Simülasyondan Çık' : 'Simülasyon ("Ya Şöyle Yapsam?")', sbx.on ? 'Gerçek verilerine geri dön.' : 'Gerçek verin bozulmadan senaryo dene.'));
     }
     cards.push(
+      card('data-nav="takvim"', 'cal', 'Ödeme takvimi', 'Taksitleri ay ay gör.'),
+      card('data-nav="pano"', 'chart', 'Ayrıntılı pano', 'Gelir, borç ve ödeme tahminlerini incele.'),
+      card('data-nav="oneriler"', 'bell', 'Öneriler', 'Bütçene uygun hatırlatmaları gör.'),
+      card('data-act="budget-limit"', 'wallet', 'Harcama hedefi', 'Aylık harcama sınırını belirle.'),
+      card('data-act="weekly-insight"', 'chart', 'Haftalık değerlendirme', 'Son yedi günü incele.'),
+      card('data-act="pet-games"', 'spark', 'Kese ile oyna', 'Bir oyun seç.'),
       card('data-nav="maliyet"', 'trend', 'Faiz Raporu', 'Bankalara toplam ne kadar faiz gidiyor?'),
       card('data-act="asgari-ac"', 'info', 'Asgari Ödeme Rehberi', 'Sadece asgari ödersen borç ne kadar uzar?'),
       card('data-act="tour"', 'spark', 'Tanıtımı izle', 'Kese maskotu uygulamayı adım adım göstersin.'),
@@ -349,7 +356,10 @@
       card('data-act="pet-toggle"', 'spark', window.KesePet && !window.KesePet.on ? 'Kese arkadaşın: Kapalı' : 'Kese arkadaşın: Açık', 'Ekranda gezen, konuşan Kese. Dokun, sürükle, sohbet et.'),
       card('data-nav="ayarlar"', 'gear', 'Ayarlar & Yedek', 'Verini yedekle, eşitle veya sıfırla.'),
     );
-    return pageHead('Araçlar', 'Borçlarını ve bütçeni kolayca yönet.') + `<div class="tools-grid today-more">${cards.join('')}</div>`;
+    return cards.join('');
+  }
+  function viewMore() {
+    return pageHead('Araçlar', 'Borçlarını ve bütçeni kolayca yönet.') + `<div class="tools-grid today-more">${toolCards()}</div>`;
   }
   function renderRateChip() {
     const el = $('rate-chip');
@@ -3970,6 +3980,7 @@
         C.toggleGiderPaid(g, ym, false); save('Ödeme kaydı geri alındı.');
       }, payInfo); return;
     }
+    if (ui.ym && el.closest('#fab') && ['gelir-new', 'gider-new', 'budget-limit', 'weekly-insight'].includes(act)) setView('butce');
     if (['gider-edit', 'gider-new', 'gelir-edit', 'gelir-new'].includes(act)) {
       if (!ui.ym) openRecurring(act.startsWith('gelir'), id);
       return;

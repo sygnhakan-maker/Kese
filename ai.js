@@ -811,7 +811,7 @@
         '    </div>',
         '    <div class="ai-head-acts">',
         '      <button type="button" class="btn ghost sm ai-clear" data-ai-act="clear" aria-label="Sohbeti temizle">Temizle</button>',
-        '      <button type="button" class="x ai-close" data-close data-ai-act="close" aria-label="Kapat">✕</button>',
+        '      <button type="button" class="btn ghost sm ai-close" data-ai-act="close">Kapat</button>',
         '    </div>',
         '  </header>',
         '  <div class="ai-feed" id="ai-feed" role="log" aria-live="polite" aria-relevant="additions"></div>',
@@ -819,6 +819,7 @@
         '    <textarea id="ai-input" class="ai-input" rows="1" maxlength="1000" placeholder="Borçlarınla ilgili bir şey sor…" aria-label="Sorunuzu yazın"></textarea>',
         '    <button type="submit" class="btn primary ai-send" id="ai-send" aria-label="Gönder">Gönder</button>',
         '  </form>',
+        '  <footer><button type="button" class="btn" data-ai-act="close">Asistanı kapat</button></footer>',
         '</div>',
       ].join('\n');
 
@@ -1094,7 +1095,9 @@
       setTimeout(() => sendUserMessage(dlg, opts.initialPrompt), 40);
     } else {
       const input = dlg.querySelector('#ai-input');
-      if (input) setTimeout(() => { try { input.focus(); } catch (e) { /* yok say */ } }, 60);
+      if (input && !window.matchMedia('(pointer: coarse)').matches) {
+        setTimeout(() => { if (dlg.open) input.focus(); }, 60);
+      }
     }
 
     return dlg;

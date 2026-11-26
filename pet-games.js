@@ -4,12 +4,13 @@ window.openKeseGames = function ({ mascot, play, restoreFocus }) {
   const dialog = document.createElement('dialog');
   dialog.className = 'pet-games';
   dialog.setAttribute('aria-labelledby', 'pet-game-title');
-  dialog.innerHTML = '<header><h2 id="pet-game-title">Kese ile oyna</h2><button class="btn ghost sm" type="button" aria-label="Kapat">×</button></header><div class="game-body"></div>';
+  dialog.innerHTML = '<header><h2 id="pet-game-title">Kese ile oyna</h2><button class="btn ghost sm" type="button" aria-label="Kapat">×</button></header><div class="game-body"></div><footer><button type="button" class="btn">Oyundan çık</button></footer>';
   document.body.appendChild(dialog);
   const title = dialog.querySelector('h2');
   const body = dialog.querySelector('.game-body');
   const close = dialog.querySelector('header button');
   close.onclick = () => dialog.close();
+  dialog.querySelector('footer button').onclick = close.onclick;
   const timers = new Set();
   function later(fn, ms) {
     const timer = setTimeout(() => { timers.delete(timer); if (dialog.open) fn(); }, ms);
