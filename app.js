@@ -1042,6 +1042,17 @@
         ${cat === 'KART' && (sel.ekstre_odemeleri || []).length ? `<div class="bekleyen"><h3>Ekstre ödemeleri</h3><ul class="list compact">${sel.ekstre_odemeleri.slice().reverse().slice(0, 24).map((x) => `<li><span class="dt">${(x.tarih || '').slice(8)}.${(x.tarih || '').slice(5, 7)}</span><div class="grow"><b>${C.fmtYM(x.ym)} ekstresi</b><small>Dönem borcu ${M(x.toplam)}${x.kalan > 0.005 ? ` · kayıt sonrası kalan ${M(x.kalan)}` : ' · tamamı ödendi'}</small></div><span class="amt">${M(x.tutar)}</span>${ui.ym ? '' : `<button type="button" class="btn sm ghost" data-act="undo-cardpay" data-pid="${sel.id}" data-iid="${x.id}">Geri al</button>`}</li>`).join('')}</ul></div>` : ''}
       </section>`;
   }
+  function installmentDisplay(cat, t, amount) {
+    const balance = C.installmentBalance(t);
+    const paid = C.r2(t.tutar - balance);
+    if (cat === 'KART' && paid > 0 && balance > 0) {
+      return {
+        detail: `<small>Kısmen ödendi · Taksit tutarı ${M(t.tutar)} · Ödenen ${M(paid)}</small>`,
+        amount: `Kalan ${M(balance)}`
+      };
+    }
+    return { detail: '', amount: M(amount) };
+  }
   /** Hesaptaki tüm kalemlerin ödenmemiş taksitleri, aylara göre gruplu (bu ay + sonraki aylar; geçmişten kalanlar en üstte). */
   function bekleyenHtml(cat, sel) {
     const nowYm = C.ymOf(now()), map = {};
@@ -1050,7 +1061,10 @@
     if (!keys.length) return '';
     const all = keys.reduce((l, k) => l.concat(map[k]), []);
     const groups = keys.map((k) => { const rows = map[k]; return `<div class="bk"><div class="bkh"><b>${k === 'gecmis' ? 'Geçmiş aylardan kalan' : C.fmtYM(k)}</b><span>${rows.length} ödeme · <b>${M(C.sum(rows, ({ t }) => C.installmentBalance(t)))}</b></span></div>
-      <ul class="list compact">${rows.map(({ h, t }) => `<li><span class="dt">${t.vade_tarihi.slice(8)}.${t.vade_tarihi.slice(5, 7)}</span><div class="grow"><b>${esc(h.aciklama)}</b><small>${h.gecikmis ? 'Gecikmiş borç' : `${t.no}/${h.toplam_taksit}. taksit`}</small></div>${chip(C.installmentStatus(t, now()))}<span class="amt">${M(C.installmentBalance(t))}</span></li>`).join('')}</ul></div>`; }).join('');
+      <ul class="list compact">${rows.map(({ h, t }) => {
+        const display = installmentDisplay(cat, t, C.installmentBalance(t));
+        return `<li><span class="dt">${t.vade_tarihi.slice(8)}.${t.vade_tarihi.slice(5, 7)}</span><div class="grow"><b>${esc(h.aciklama)}</b><small>${h.gecikmis ? 'Gecikmiş borç' : `${t.no}/${h.toplam_taksit}. taksit`}</small>${display.detail}</div>${chip(C.installmentStatus(t, now()))}<span class="amt">${display.amount}</span></li>`;
+      }).join('')}</ul></div>`; }).join('');
     return `<div class="bekleyen"><h3>${cat === 'KART' ? 'Ekstreler (ödeme ayına göre)' : 'Bekleyen taksitler (aylara göre)'}</h3><p class="muted">Toplam <b>${M(C.sum(all, ({ t }) => C.installmentBalance(t)))}</b> · ${all.length} ödeme · ${keys.length} ay</p>${groups}</div>`;
   }
   function capWarning(cat, acc) {
@@ -1106,9 +1120,10 @@
     const multiKey = `${cat}:${pid}:${h.id}`, multi = !!(ui.multi && ui.multi.has(multiKey));
     const rows = h.taksitler.map((t, i) => {
       const k = `${multiKey}:${t.no}`, c = cb[i] || { ana: 0, faiz: 0 }, a = `data-cat="${cat}" data-pid="${pid}" data-iid="${h.id}" data-no="${t.no}"`;
+      const display = installmentDisplay(cat, t, t.tutar);
       const act = ui.ym || cat === 'KART' ? '' : t.odendi ? `<button type="button" class="btn sm ghost" data-act="unpay" ${a}>Geri al</button>` : `<button type="button" class="btn sm" data-act="pay" ${a}>Ödedim</button>`;
       return `<li>${multi ? `<input type="checkbox" style="width:22px;height:22px;margin:0" data-act="pick" data-k="${k}" ${ui.picked.has(k) ? 'checked' : ''} aria-label="${t.no}. taksidi seç">` : ''}
-        <div class="grow">${t.no}/${h.toplam_taksit}. taksit<small>Vade ${C.fmtDate(t.vade_tarihi)} · ana para ${M(c.ana)} + faiz ${M(c.faiz)}</small></div>${chip(C.installmentStatus(t, now()))}<span class="amt">${M(t.tutar)}</span>${act}</li>`;
+        <div class="grow">${t.no}/${h.toplam_taksit}. taksit<small>Vade ${C.fmtDate(t.vade_tarihi)} · ana para ${M(c.ana)} + faiz ${M(c.faiz)}</small>${display.detail}</div>${chip(C.installmentStatus(t, now()))}<span class="amt">${display.amount}</span>${act}</li>`;
     }).join('');
     const bulk = multi ? `<button class="btn sm primary" data-act="pay-picked" data-cat="${cat}" data-pid="${pid}" data-iid="${h.id}" data-val="1">Seçilenleri ödendi yap</button>
         <button class="btn sm" data-act="pay-picked" data-cat="${cat}" data-pid="${pid}" data-iid="${h.id}" data-val="0">Seçilenleri geri al</button>
