@@ -2638,6 +2638,14 @@
     return { src, tutar: ana, ana, tarih, kmh: false, n, faiz, toplam, aylik: C.r2(toplam / n), ex, ilkYm, taksitler, gecmis, odenen, devam, kalanBorc, sonraki,
       kullanilabilir, asim: kullanilabilir != null && kalanBorc > kullanilabilir + 0.005 };
   }
+  function remainingSpendPrincipal(plan) {
+    const unpaid = plan.taksitler.filter(t => !t.odendi);
+    if (unpaid.length === plan.n) return plan.ana;
+    const factor = 1 + C.monthlyRate(plan.faiz, C.vergiFor(S()));
+    // Son taksit, kuruş yuvarlaması nedeniyle diğerlerinden farklı olabilir.
+    const principal = unpaid.reduceRight((balance, t) => (balance + t.tutar) / factor, 0);
+    return C.r2(Math.min(plan.ana, plan.kalanBorc, principal));
+  }
   function spendRate(d) {
     if (d.tur === 'tek') return 0;
     if (String(d.faiz ?? '').trim() !== '') return num(d.faiz);
@@ -2656,14 +2664,15 @@
       const p = spendPlan(d); if (!p) return '';
       if (p.kmh) return `<table class="wizsum compact"><tbody><tr><td>Tutar</td><td>${M(p.tutar)}</td></tr><tr><td>Tarih</td><td>${C.fmtDate(p.tarih)}</td></tr><tr><td>Bakiye</td><td>${C.hesapBakiye(p.src.acc) < 0 ? '−' : ''}${M(Math.abs(C.hesapBakiye(p.src.acc)))} → <b class="${p.yeni < 0 ? 'bad-t' : ''}">${p.yeni < 0 ? '−' : ''}${M(Math.abs(p.yeni))}</b></td></tr></tbody></table>`
         + (p.eksiye && !p.asim ? `<p class="hint">Hesap eksiye düşer; ayda yaklaşık ${M(-p.yeni * (Number(p.src.acc.faiz_orani) || 0) / 100 * C.vergiFor(S()))} faiz ve vergi işler.</p>` : '');
+      const kalanAna = remainingSpendPrincipal(p);
       const faizTop = C.r2(p.toplam - p.ana), rows = [
         [d.tur === 'avans' ? 'Çekilen tutar' : 'Harcama tutarı', M(p.ana) + (tak(d) && d.bil === 'taksit' ? ' <span class="calc-tag">hesaplandı</span>' : '')],
         tak(d) ? ['Taksit', `${p.n} × ${M(p.aylik)}` + (d.bil !== 'taksit' ? ' <span class="calc-tag">hesaplandı</span>' : '')] : null,
         tak(d) ? ['Toplam geri ödeme', M(p.toplam)] : null,
         tak(d) ? ['Aylık faiz', pct(p.faiz) + (d.tur === 'avans' && d.faiz === '' ? ' · TCMB azami oranıyla tahmin' : '')] : null,
         tak(d) ? ['Toplam faiz ve vergi', M(faizTop)] : null,
-        tak(d) ? ['Kalan ana para', M(C.r2(C.annuityPrincipal(p.aylik, p.faiz, p.taksitler.filter((t) => !t.odendi).length, C.vergiFor(S()))))] : null,
-        tak(d) ? ['Kalan faiz ve vergi', M(Math.max(0, C.r2(p.kalanBorc - C.annuityPrincipal(p.aylik, p.faiz, p.taksitler.filter((t) => !t.odendi).length, C.vergiFor(S())))))] : null,
+        tak(d) ? ['Kalan ana para', M(kalanAna)] : null,
+        tak(d) ? ['Kalan faiz ve vergi', M(C.r2(p.kalanBorc - kalanAna))] : null,
         p.devam ? ['Ödenen / kalan', `${p.odenen} / ${p.n - p.odenen} taksit`] : p.kmhAvans ? ['İlk taksit', C.fmtDate(p.ex.sonOdemeIso)] : ['Ekstre', `${C.fmtDate(p.ex.kesimIso)} kesimi → ödeme ${C.fmtDate(p.ex.sonOdemeIso)}`],
         p.sonraki && tak(d) ? ['Sıradaki taksit', C.fmtDate(p.sonraki.vade_tarihi)] : null,
         tak(d) ? ['Son taksit', C.fmtYM(C.ymAdd(p.ilkYm, p.n - 1))] : null,
@@ -2739,6 +2748,7 @@
           liveTop: d => {
             const p = spendPlan(d), dates = inferredCardDates(d,p.src.acc);
             if (dates.start > C.isoOf(now())) return 'Bu ödeme ayı harcamayı geleceğe taşıyor. Ekstrendeki ödeme ayını kontrol et.';
+            const kalanAna = remainingSpendPrincipal(p);
             return reviewRows([
               ['Bir taksidin tutarı', M(p.aylik)], ['Taksit sayısı', `${d.odenen} ödendi · ${d.kalan} kaldı`],
               ['Toplam geri ödeme', M(p.toplam)], ['Kalan ödeme', M(p.kalanBorc)],
@@ -2748,8 +2758,8 @@
               ...(d.ack ? [['Açıklama',d.ack]] : [])
             ]) + `<details><summary>Tahmin ve taksit dökümü</summary><p>Kartın hesap kesimine göre alışveriş ${C.fmtDate(dates.start)} ile ${C.fmtDate(dates.estimate)} arasında yapılmış olabilir.</p>${reviewRows([
               ['Aylık faiz', pct(p.faiz)],
-              ['Tahmini kalan ana para', M(C.r2(C.annuityPrincipal(p.aylik,p.faiz,Number(d.kalan),C.vergiFor(S()))))],
-              ['Tahmini kalan faiz ve vergi', M(Math.max(0,C.r2(p.kalanBorc - C.annuityPrincipal(p.aylik,p.faiz,Number(d.kalan),C.vergiFor(S())))))]
+              ['Tahmini kalan ana para', M(kalanAna)],
+              ['Tahmini kalan faiz ve vergi', M(C.r2(p.kalanBorc - kalanAna))]
             ])}<ol>${p.taksitler.map(t => `<li>${C.fmtDate(t.vade_tarihi)} · ${M(t.tutar)} · ${t.odendi ? 'Ödendi' : 'Ödenecek'}</li>`).join('')}</ol></details>`;
           },
           validate: d => inferredCardDates(d,srcOf(d).acc).start > C.isoOf(now()) ? 'Bu ödeme ayı harcamayı geleceğe taşıyor. Ekstrendeki ödeme ayını kontrol et.' : d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 20) ? 'Aylık faizi 0 ile 20 arasında gir.' : validateSpend(d) },
