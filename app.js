@@ -1371,7 +1371,7 @@
         const paid = !!t.odendi, covered = !!t.sigortaOder;
         if (paid && t.ym < thisYm) return;                       // geçmiş ayların ödenmişleri gösterilmez
         const key = !paid && !covered && t.ym < thisYm ? 'gecmis' : t.ym;
-        add(key, { vade: t.vade_tarihi, durum: paid ? 'odendi' : covered ? 'sigorta' : C.installmentStatus(t, now()), banka: e.banka, cat: e.cat, hesap: e.hesap,
+        add(key, { ym: t.ym, vade: t.vade_tarihi, durum: paid ? 'odendi' : covered ? 'sigorta' : C.installmentStatus(t, now()), banka: e.banka, cat: e.cat, hesap: e.hesap,
           aciklama: e.cat === 'KREDI' ? it.kredi_adi : it.aciklama, taksitNo: t.no, toplam: it.toplam_taksit, tutar: paid || covered ? t.tutar : C.installmentBalance(t), pid: e.parent ? e.parent.id : 0, iid: it.id });
       });
     });
@@ -2479,7 +2479,7 @@
     const k = db.kredi_kartlari.find((x) => x.id === kartId); if (!k) return;
     const st = stmtOf(k);
     if (!st) return toast('Bu kartta ödenecek ekstre yok.');
-    const sYm = ym && ym >= st.ym ? ym : st.ym;
+    const sYm = /^\d{4}-(0[1-9]|1[0-2])$/.test(ym) && ym >= st.ym ? ym : st.ym;
     const base = C.cardPayPreview(k, sYm, 0, S(), R());
     const vade = base.rows.reduce((date, { t }) => date ? (t.vade_tarihi < date ? t.vade_tarihi : date) : t.vade_tarihi, '');
     const amount = (d) => d.sec === 'tam' ? base.toplam : d.sec === 'asgari' ? base.asgari : posNum(d.tutar);
