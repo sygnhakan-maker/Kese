@@ -2605,7 +2605,7 @@
     }
     if (src.cat === 'KMH') {      // artı paradan taksitli nakit avans (taksitli KMH)
       const a = src.acc, v = C.vergiFor(S()), n = Math.min(60, Math.max(1, parseInt(d.n) || 0)), gun = Number(d.sonraki?.slice(8)) || a.hesap_kesim_gunu || 30;
-      const faiz = spendRate(d, src);
+      const faiz = spendRate(d);
       let ana, toplam;
       if (d.bil === 'taksit') { const x = posNum(d.aylik); toplam = C.r2(x * n); ana = C.r2(C.annuityPrincipal(x, faiz, n, v)); }
       else { ana = posNum(d.tutar); toplam = C.annuityTotal(ana, faiz, n, v); }
@@ -2620,7 +2620,7 @@
     }
     const k = src.acc, tek = d.tur === 'tek', v = C.vergiFor(S());
     const n = tek ? 1 : Math.min(60, Math.max(1, parseInt(d.n) || 0));
-    const faiz = spendRate(d, src);
+    const faiz = spendRate(d);
     let ana, toplam;
     if (!tek && d.bil === 'taksit') { const a = posNum(d.aylik); toplam = C.r2(a * n); ana = C.r2(C.annuityPrincipal(a, faiz, n, v)); }
     else { ana = posNum(d.tutar); toplam = tek ? ana : C.annuityTotal(ana, faiz, n, v); }
@@ -2638,13 +2638,11 @@
     return { src, tutar: ana, ana, tarih, kmh: false, n, faiz, toplam, aylik: C.r2(toplam / n), ex, ilkYm, taksitler, gecmis, odenen, devam, kalanBorc, sonraki,
       kullanilabilir, asim: kullanilabilir != null && kalanBorc > kullanilabilir + 0.005 };
   }
-  function spendRate(d, src) {
+  function spendRate(d) {
     if (d.tur === 'tek') return 0;
     if (String(d.faiz ?? '').trim() !== '') return num(d.faiz);
     if (d.tur === 'avans') return R()?.nakit_kmh?.akdi ?? 4.25;
-    const balance = Math.max(C.cardUsed(src.acc), posNum(d.tutar), posNum(d.aylik) * (Number(d.n) || 0));
-    return balance < 30000 ? R()?.kart_30bin_alti?.akdi ?? 3.25
-      : balance <= 180000 ? R()?.kart_30_180bin?.akdi ?? 3.75 : R()?.kart_180bin_ustu?.akdi ?? 4.25;
+    return 0;
   }
   function openSpend(pre) {
     const srcs = spendSources();
@@ -2662,7 +2660,7 @@
         [d.tur === 'avans' ? 'Çekilen tutar' : 'Harcama tutarı', M(p.ana) + (tak(d) && d.bil === 'taksit' ? ' <span class="calc-tag">hesaplandı</span>' : '')],
         tak(d) ? ['Taksit', `${p.n} × ${M(p.aylik)}` + (d.bil !== 'taksit' ? ' <span class="calc-tag">hesaplandı</span>' : '')] : null,
         tak(d) ? ['Toplam geri ödeme', M(p.toplam)] : null,
-        tak(d) ? ['Aylık faiz', pct(p.faiz) + (d.faiz === '' ? ' · TCMB azami oranıyla tahmin' : '')] : null,
+        tak(d) ? ['Aylık faiz', pct(p.faiz) + (d.tur === 'avans' && d.faiz === '' ? ' · TCMB azami oranıyla tahmin' : '')] : null,
         tak(d) ? ['Toplam faiz ve vergi', M(faizTop)] : null,
         tak(d) ? ['Kalan ana para', M(C.r2(C.annuityPrincipal(p.aylik, p.faiz, p.taksitler.filter((t) => !t.odendi).length, C.vergiFor(S()))))] : null,
         tak(d) ? ['Kalan faiz ve vergi', M(Math.max(0, C.r2(p.kalanBorc - C.annuityPrincipal(p.aylik, p.faiz, p.taksitler.filter((t) => !t.odendi).length, C.vergiFor(S())))))] : null,
@@ -2704,42 +2702,52 @@
         entryMethod(), uploadStep(),
         wizardChoice('tur', 'Hangi işlem türü?', d => isK(d) ? [['tek', 'Hesap harcaması'], ['avans', 'Taksitli nakit avans']] : SPEND_TUR, { edit: 'İşlem türünü', skip: d => isK(d) && !kmhLim(d) }),
         wizardChoice('bil', 'Hangi tutarı biliyorsun?', [['tutar','İşlem tutarı'],['taksit','Bir taksidin tutarı']], { skip: d => !tak(d) }),
-        { id: 'amount', edit: 'İşlemi', soru: 'Harcama bilgileri',
+        { id: 'amount', edit: 'İşlemi', soru: 'Harcama bilgileri', skip: fromCardInstallment,
           html: d => kartInfo(d) + fgrp('İşlem', (tak(d) && d.bil === 'taksit' ? fld('Bir taksidin tutarı (₺) *', moneyIn('wz-aylik', d.aylik)) : fld('İşlem tutarı (₺) *', moneyIn('wz-tutar', d.tutar)))
-            + (fromCardInstallment(d) ? '' : dateField('tarih','İşlem tarihi *', d.tarih)) + fld('Açıklama (isteğe bağlı)', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`)),
+            + dateField('tarih','İşlem tarihi *', d.tarih) + fld('Açıklama (isteğe bağlı)', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`)),
           read: readDraft,
-          validate: d => !posNum(tak(d) && d.bil === 'taksit' ? d.aylik : d.tutar) ? 'Tutarı gir.' : !fromCardInstallment(d) && !d.tarih ? 'İşlem tarihini seç.' : !tak(d) ? validateSpend(d) : '' },
-        { id: 'counts', edit: 'Taksit sayılarını', soru: 'Taksitlerin ne kadarı kaldı?', skip: d => !fromCardInstallment(d),
-          html: d => fgrp('Taksit sayıları',
-            dayField('odenen','Kaç taksit ödedin?',d.odenen,59,0)
-            + dayField('kalan','Kaç taksit kaldı?',d.kalan,60)),
+          validate: d => !posNum(tak(d) && d.bil === 'taksit' ? d.aylik : d.tutar) ? 'Tutarı gir.' : !d.tarih ? 'İşlem tarihini seç.' : !tak(d) ? validateSpend(d) : '' },
+        { id: 'counts', edit: 'Taksit bilgilerini', soru: 'Taksit bilgilerin', skip: d => !fromCardInstallment(d),
+          html: d => kartInfo(d) + fgrp('Taksitli alışveriş',
+            fld('Aylık taksit tutarı (₺) *', moneyIn('wz-aylik', d.aylik))
+            + dayField('odenen','Kaç taksit ödedin?',d.odenen,59,0)
+            + dayField('kalan','Kaç taksit kaldı?',d.kalan,60)
+            + fld('Açıklama (isteğe bağlı)', `<input id="wz-ack" maxlength="80" value="${esc(d.ack)}">`)),
           read: (d,b) => { readDraft(d,b); d.n = String(Number(d.odenen) + Number(d.kalan)); },
-          validate: d => !boundedInt(d.odenen,0,59) ? 'Ödediğin taksit sayısını gir. Henüz ödemediysen 0 yaz.' : !boundedInt(d.kalan,1,60) ? 'Kalan taksit sayısını 1 ile 60 arasında gir.' : !boundedInt(d.n,2,60) ? 'Ödenen ve kalan taksitlerin toplamı 2 ile 60 arasında olmalı.' : '',
-          live: d => boundedInt(d.odenen,0,59) && boundedInt(d.kalan,1,60) ? `Toplam taksit sayısı: <b>${d.n} adet</b> · Kalan ödeme: <b>${M(C.r2(posNum(d.aylik) * Number(d.kalan)))}</b>` : '' },
+          validate: d => !posNum(d.aylik) ? 'Aylık taksit tutarını gir.' : !boundedInt(d.odenen,0,59) ? 'Ödediğin taksit sayısını gir. Henüz ödemediysen 0 yaz.' : !boundedInt(d.kalan,1,60) ? 'Kalan taksit sayısını 1 ile 60 arasında gir.' : !boundedInt(d.n,2,60) ? 'Ödenen ve kalan taksitlerin toplamı 2 ile 60 arasında olmalı.' : '',
+          live: d => {
+            if (!posNum(d.aylik) || !boundedInt(d.odenen,0,59) || !boundedInt(d.kalan,1,60) || !boundedInt(d.n,2,60)) return '';
+            const dates = inferredCardDates(d, srcOf(d).acc);
+            return reviewRows([
+              ['Toplam taksit sayısı', `${d.n} adet`],
+              ['Toplam geri ödeme', M(C.r2(posNum(d.aylik) * Number(d.n)))],
+              ['Kalan ödeme', M(C.r2(posNum(d.aylik) * Number(d.kalan)))],
+              dates.start <= C.isoOf(now()) && ['Tahmini harcama ayı', C.fmtYM(dates.estimate.slice(0,7))]
+            ]);
+          } },
         { id: 'schedule', edit: 'Planı', soru: 'Taksit planı', skip: d => !tak(d) || fromCardInstallment(d),
           html: d => fgrp('Ödeme planı', dayField('n','Toplam taksit sayısı (adet) *',d.n,60,2)
             + dayField('odenen','Ödenen taksit',d.odenen,59,0)
             + dateField('sonraki','Sıradaki vade (isteğe bağlı)',d.sonraki)
-            + fld('Aylık faiz (%)', moneyIn('wz-faiz',d.faiz) + `<small class="hint">Faizsiz taksit için 0 yaz. Boş bırakırsan %${trNum(spendRate({...d, faiz:''},srcOf(d)))} ile tahmin edilir.</small>`)),
+            + fld('Aylık faiz (%)', moneyIn('wz-faiz',d.faiz) + `<small class="hint">${d.tur === 'avans' ? `Boş bırakırsan %${trNum(spendRate({...d, faiz:''}))} ile tahmin edilir.` : 'Faizli alışverişte aylık oranı gir. Boş bırakırsan faizsiz hesaplanır.'}</small>`)),
           read: (d,b) => { readDraft(d,b); d.mod = d.sonraki ? 'devam' : 'yeni'; },
           validate: d => !boundedInt(d.n,2,60) ? 'Toplam taksiti 2 ile 60 arasında gir.' : !boundedInt(d.odenen || 0,0,Number(d.n)-1) ? 'Ödenen taksit, toplam taksitten az olmalı.' : d.faiz !== '' && !(num(d.faiz) >= 0 && num(d.faiz) <= 20) ? 'Aylık faizi 0 ile 20 arasında gir.' : validateSpend(d) },
         { id: 'cardReview', soru: 'Ödeme planın doğru mu?', skip: d => !fromCardInstallment(d),
           html: d => kartInfo(d) + moreBox(!!d.vadeAy || d.faiz !== '', fld('Sıradaki taksidin ödeme ayı', `<input type="month" id="wz-vadeAy" value="${esc(d.vadeAy)}"><small>Ekstrendeki ay farklıysa seç.</small>`)
-            + faizField(d,'Faizsiz alışveriş için 0 yaz.')) + reviewLinks(),
+            + faizField(d,'Faizli alışverişte aylık oranı gir. Boş bırakırsan faizsiz hesaplanır.')) + reviewLinks(),
           read: readDraft,
           liveTop: d => {
             const p = spendPlan(d), dates = inferredCardDates(d,p.src.acc);
             if (dates.start > C.isoOf(now())) return 'Bu ödeme ayı harcamayı geleceğe taşıyor. Ekstrendeki ödeme ayını kontrol et.';
             return reviewRows([
               ['Bir taksidin tutarı', M(p.aylik)], ['Taksit sayısı', `${d.odenen} ödendi · ${d.kalan} kaldı`],
-              ['Kalan ödeme', M(p.kalanBorc)], ['Sıradaki ödeme', C.fmtDate(p.sonraki.vade_tarihi)],
+              ['Toplam geri ödeme', M(p.toplam)], ['Kalan ödeme', M(p.kalanBorc)],
+              ['Sıradaki ödeme', C.fmtDate(p.sonraki.vade_tarihi)],
               ['Son ödeme', C.fmtDate(p.taksitler[p.n - 1].vade_tarihi)],
               ['Tahmini harcama ayı', C.fmtYM(dates.estimate.slice(0,7))],
-
               ...(d.ack ? [['Açıklama',d.ack]] : [])
             ]) + `<details><summary>Tahmin ve taksit dökümü</summary><p>Kartın hesap kesimine göre alışveriş ${C.fmtDate(dates.start)} ile ${C.fmtDate(dates.estimate)} arasında yapılmış olabilir.</p>${reviewRows([
-              ['Aylık faiz', pct(p.faiz) + (d.faiz === '' ? ' · tahmini' : '')],
-              ['Toplam geri ödeme', M(p.toplam)],
+              ['Aylık faiz', pct(p.faiz)],
               ['Tahmini kalan ana para', M(C.r2(C.annuityPrincipal(p.aylik,p.faiz,Number(d.kalan),C.vergiFor(S()))))],
               ['Tahmini kalan faiz ve vergi', M(Math.max(0,C.r2(p.kalanBorc - C.annuityPrincipal(p.aylik,p.faiz,Number(d.kalan),C.vergiFor(S())))))]
             ])}<ol>${p.taksitler.map(t => `<li>${C.fmtDate(t.vade_tarihi)} · ${M(t.tutar)} · ${t.odendi ? 'Ödendi' : 'Ödenecek'}</li>`).join('')}</ol></details>`;
