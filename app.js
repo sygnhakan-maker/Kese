@@ -833,7 +833,7 @@
         const nxt = nextUnpaidOf((a.hareketler || []).map((h) => ({ cat: 'KART', pid: a.id, item: h })));
         const isLate = nxt && nxt.durum === 'gecikmis';
         const sonraki = st ? C.r2(used - st.toplam) : used;
-        const asgari = st && lim > 0 ? C.r2(st.toplam * C.minPaymentRate(lim, S())) : 0;
+        const asgari = st ? C.cardPayPreview(a, st.ym, 0, S(), R()).asgari : 0;
         const pctUsed = lim > 0 ? Math.min(100, Math.round(used / lim * 100)) : 0;
         const payAct = !ui.ym && st ? `<button type="button" class="btn sm primary" data-act="pay-stmt" data-cat="KART" data-id="${a.id}">Yaptığım ödemeyi kaydet</button>` : '';
         cards.push({
@@ -842,7 +842,7 @@
             <div class="debt-card-top"><span class="debt-type-tag">${icon('card')} Kredi kartı</span>${isLate ? '<span class="chip bad">Gecikmiş!</span>' : ''}${a.sigorta_kapsam ? `<span class="chip info">${icon('shield')} Sigorta</span>` : ''}</div>
             <div class="debt-card-head">${a.banka && a.banka !== 'Diğer' ? `<span class="muted">${esc(a.banka)}</span>` : ''}<h3>${esc(a.kart_adi)}</h3></div>
             <div class="debt-card-amt"><strong>${M(st ? st.toplam : 0)}</strong><small>${st ? `Ekstre borcu · son ödeme ${C.fmtDate(st.vade)}` : 'Ödenecek ekstre yok'}</small></div>
-            ${asgari > 0 ? `<div class="debt-meta">Asgari ödeme: <b class="warn-t">${M(asgari)}</b></div>` : ''}
+            ${st ? `<div class="debt-meta">Asgari için kalan: <b class="${asgari > 0 ? 'warn-t' : 'ok-t'}">${M(asgari)}</b></div>` : ''}
             <div class="debt-prog">${lim > 0 ? `<div class="meter${pctUsed > 85 ? ' hot' : ''}" aria-label="Limitin %${pctUsed} kullanılıyor"><i style="width:${pctUsed}%"></i></div>` : ''}<span>${lim > 0 ? `Kullanılan ${M(used)} / ${M(lim)} · kullanılabilir <b>${M(Math.max(0, lim - used))}</b>` : `Kullanılan ${M(used)} · limit girilmedi`}</span></div>
             ${sonraki > 0.5 ? `<div class="debt-meta">${icon('cal')} Sonraki ekstrelere taksitler: <b>${M(sonraki)}</b></div>` : ''}
             <div class="debt-actions">${payAct}<button type="button" class="btn sm" data-act="sel-acc" data-cat="KART" data-id="${a.id}">Detay</button>${ui.ym ? '' : `<button type="button" class="btn sm" data-act="add-har" data-cat="KART" data-pid="${a.id}">Harcama ekle</button>
@@ -1016,12 +1016,18 @@
     if (cat === 'KMH') return hesapKmhHtml(sel);
     const st = accountStats(cat, sel);
     const name = cat === 'KMH' ? sel.hesap_adi : sel.kart_adi;
+    const statement = stmtOf(sel);
     let extra = '';
     if (cat === 'KART') {
-      const m = C.cardMinPayment(sel, now(), S());
+      const period = statement?.ym || C.ymOf(now());
+      const preview = statement && C.cardPayPreview(sel, period, 0, S(), R());
+      const m = preview ? {
+        toplam: C.r2(preview.toplam + preview.oncekiOdeme), donemBorcu: preview.toplam,
+        odenen: preview.oncekiOdeme, oran: preview.oran, asgari: preview.asgariToplam, kalanAsgari: preview.asgari
+      } : C.cardMinPayment(sel, now(), S());
       const t = C.minPaymentTrap(m.donemBorcu, sel.faiz_orani, C.vergiFor(S()), m.oran, 0);
-      extra = `<div class="kv"><div><span>Dönem borcu (toplam)</span><b>${M(m.toplam)}</b></div>${m.odenen > 0.5 ? `<div><span>Bu ay ödenen</span><b class="ok-t">${icon('check')} ${M(m.odenen)}</b></div><div><span>Ödenecek kalan</span><b>${M(m.donemBorcu)}</b></div>` : ''}
-        <div><span>Asgari ödeme (%${Math.round(m.oran * 100)})</span><b class="warn-t">${M(m.asgari)}</b>${m.odenen > 0.5 ? `<small class="${m.kalanAsgari > 0 ? 'warn-t' : 'ok-t'}" style="display:block">${m.kalanAsgari > 0 ? M(m.kalanAsgari) + ' daha ödemelisiniz' : icon('check') + ' asgari karşılandı'}</small>` : ''}</div>
+      extra = `<h3 class="sub-h">${C.fmtYM(period)} ekstresi</h3><div class="kv"><div><span>Dönem borcu (toplam)</span><b>${M(m.toplam)}</b></div>${m.odenen > 0 ? `<div><span>Bu ekstreye ödenen</span><b class="ok-t">${icon('check')} ${M(m.odenen)}</b></div><div><span>Ödenecek kalan</span><b>${M(m.donemBorcu)}</b></div>` : ''}
+        <div><span>Dönemin asgari ödemesi</span><b class="warn-t">${M(m.asgari)}</b>${m.odenen > 0 ? `<small class="${m.kalanAsgari > 0 ? 'warn-t' : 'ok-t'}" style="display:block">${m.kalanAsgari > 0 ? M(m.kalanAsgari) + ' daha ödemelisiniz' : icon('check') + ' asgari karşılandı'}</small>` : ''}</div>
         <div><span>Kesim / son ödeme</span><b>${sel.kesim_gunu}. gün / ${sel.son_odeme_gunu}. gün</b></div></div>
         ${m.donemBorcu > 0 && t.toplamFaiz > 0 ? `<div class="note">Yalnız asgari öderseniz (yeni harcama yapmazsanız) borç yaklaşık <b>${t.ay} ayda</b> biter ve <b>${M(t.toplamFaiz)}</b> faiz ödersiniz.</div>` : ''}`;
     }
@@ -1030,7 +1036,7 @@
     const gecNote = gecList.length ? `<div class="note" style="border-top:0;color:var(--bad)">${icon('warn')} Bu ${cat === 'KMH' ? 'hesapta' : 'kartta'} ${gecList.length} gecikmiş borç var: toplam <b>${M(C.sum(gecList, (x) => x.o.toplam))}</b> (faiz ${M(C.sum(gecList, (x) => x.o.faiz))}). Her gün <b>${M(C.sum(gecList, (x) => x.o.gunluk))}</b> büyüyor.</div>` : '';
     const rows = sel.hareketler.map((h) => harRow(cat, sel, h)).join('');
     return `<section class="panel"><header><div><h2>${esc(sel.banka)} · ${esc(name)}</h2><p>${sel.limit > 0 ? `Kalan limit ${M(st.kalanLimit)}` : 'Limit belirtilmedi'} · Faiz ${pct(sel.faiz_orani)} aylık${capMsg}${sel.sigorta_kapsam ? ` · <span class="info-t">${covText(sel, cat)}</span>` : ''}</p></div>
-        <div>${cat === 'KART' && stmtOf(sel) && !ui.ym ? `<button class="btn sm primary" data-act="pay-stmt" data-id="${sel.id}">Yaptığım ödemeyi kaydet</button>` : ''}<button class="btn sm" data-act="edit-hesap" data-cat="${cat}" data-id="${sel.id}">Düzenle</button>
+        <div>${statement && !ui.ym ? `<button class="btn sm primary" data-act="pay-stmt" data-id="${sel.id}">Yaptığım ödemeyi kaydet</button>` : ''}<button class="btn sm" data-act="edit-hesap" data-cat="${cat}" data-id="${sel.id}">Düzenle</button>
         ${cat === 'KART' && !sel.hareketler.length && !ui.ym ? `<button class="btn sm" data-act="opening-statement" data-id="${sel.id}">Mevcut ekstre borcumu gir</button>` : ''}
         <button class="btn sm danger" data-act="del-hesap" data-cat="${cat}" data-id="${sel.id}">Sil</button>
         <button class="btn sm" data-act="add-sig" data-bcat="${cat}" data-bid="${sel.id}" title="Sigorta bu ürünün taksitlerini bir süre sizin yerinize öder">${icon('shield')} Sigorta ödüyor</button>
@@ -2491,7 +2497,7 @@
           <div><span>Son ödeme tarihi</span><b>${C.fmtDate(vade)}</b></div>
           <div><span>Ödenen toplam</span><b>${M(base.oncekiOdeme)}</b></div>
           <div><span>Kalan ekstre borcu</span><b>${M(base.toplam)}</b></div>
-          <div><span>Asgari için kalan</span><b class="warn-t">${M(base.asgari)}</b></div></div>`
+          <div><span>Asgari için kalan</span><b class="${base.asgari > 0 ? 'warn-t' : 'ok-t'}">${M(base.asgari)}</b></div></div>`
           + choiceHtml('wz-sec', [['tam', 'Kalan borcun tamamını ödedim', M(base.toplam)],
             ...(base.asgari > 0 ? [['asgari', 'Asgari için gereken tutarı ödedim', M(base.asgari)]] : []),
             ['diger', 'Başka bir tutar ödedim', 'Ödediğin tutarı yaz']], d.sec)
