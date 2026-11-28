@@ -982,10 +982,11 @@
     if (!it) { if (dlg.open) dlg.close(); return; }
     const kredi = cat === 'KREDI', top = kredi ? C.fmtYM(it.taksitler.length ? it.taksitler[it.taksitler.length - 1].ym : it.ilk_taksit_ym) : '';
     const hasUnpaid = C.unpaid(it).length > 0;
+    const linked = itemHasCardPayment(cat, Number(pid), it.id);
     $('inst-title').textContent = kredi ? `${it.banka && it.banka !== 'Diğer' ? it.banka + ' · ' : ''}${it.kredi_adi}` : (it.aciklama || it.tur);
     $('inst-sub').innerHTML = it.gecikmis ? 'Gecikmiş borç' : `${it.toplam_taksit} taksit · kalan ${M(C.remainingTotal(it))}${kredi && top ? ` · bitiş ${top}` : ''}`;
     const topBar = `<div class="inst-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      ${!ui.ym && hasUnpaid ? `<button type="button" class="btn sm primary" data-act="early-close" data-cat="${cat}" data-pid="${parseInt(pid)}" data-iid="${it.id}">${icon('check')} Borcu Erken Kapattım</button>` : ''}
+      ${!ui.ym && !sbx.on && hasUnpaid && !linked ? `<button type="button" class="btn sm primary" data-act="early-close" data-cat="${cat}" data-pid="${parseInt(pid)}" data-iid="${it.id}">${icon('check')} Borcu Erken Kapattım</button>` : ''}
       ${kredi ? `<button type="button" class="btn sm" data-act="edit-kredi" data-iid="${it.id}">Düzenle</button>` : ''}
       ${kredi ? `<button type="button" class="btn sm" data-act="add-sig" data-bcat="KREDI" data-bid="${it.id}">${icon('shield')} Sigorta ödüyor</button>` : ''}
       ${kredi ? `<button type="button" class="btn sm danger" data-act="del-kredi" data-iid="${it.id}">Sil</button>` : ''}
@@ -1085,6 +1086,11 @@
   function harRow(cat, parent, h) { return labelTds(harRowRaw(cat, parent, h), HAR_LABELS); }
   function hasLinkedCardPayment(card, itemId) {
     return (card.ekstre_odemeleri || []).some((payment) => payment.devreden_id === itemId || (payment.refs || []).some((ref) => ref.hid === itemId));
+  }
+  function itemHasCardPayment(cat, pid, iid) {
+    if (cat !== 'KART') return false;
+    const card = db.kredi_kartlari.find((x) => x.id === pid);
+    return !!card && hasLinkedCardPayment(card, iid);
   }
   function harRowRaw(cat, parent, h) {
     const key = `${cat}:${parent.id}:${h.id}`, open = ui.open === key, v = C.vergiFor(S());
@@ -3849,7 +3855,7 @@
     }
     if (act === 'edit-har') {
       const it = findItem(d.cat, pid, iid);
-      if (d.cat === 'KART' && hasLinkedCardPayment(db.kredi_kartlari.find((k) => k.id === pid) || {}, iid)) return;
+      if (itemHasCardPayment(d.cat, pid, iid)) return;
       if (it?.ekstre_baslangic) return openOpeningStatement(pid, iid);
       return it && it.gecikmis ? openGec(d.cat, pid, iid) : openHar(d.cat, pid, iid);
     }
@@ -3927,7 +3933,7 @@
       return;
     }
     if (act === 'early-close') {
-      if (ui.ym) return;
+      if (ui.ym || sbx.on || itemHasCardPayment(d.cat, pid, iid)) return;
       const o = findItem(d.cat, pid, iid); if (!o) return;
       const un = C.unpaid(o);
       if (!un.length) return toast('Bu borcun bekleyen taksiti kalmamış.');
