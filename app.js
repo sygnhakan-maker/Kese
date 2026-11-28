@@ -1377,8 +1377,10 @@
         const paid = !!t.odendi, covered = !!t.sigortaOder;
         if (paid && t.ym < thisYm) return;                       // geçmiş ayların ödenmişleri gösterilmez
         const key = !paid && !covered && t.ym < thisYm ? 'gecmis' : t.ym;
-        add(key, { ym: t.ym, vade: t.vade_tarihi, durum: paid ? 'odendi' : covered ? 'sigorta' : C.installmentStatus(t, now()), banka: e.banka, cat: e.cat, hesap: e.hesap,
-          aciklama: e.cat === 'KREDI' ? it.kredi_adi : it.aciklama, taksitNo: t.no, toplam: it.toplam_taksit, tutar: paid || covered ? t.tutar : C.installmentBalance(t), pid: e.parent ? e.parent.id : 0, iid: it.id });
+        const amount = paid || covered ? t.tutar : C.installmentBalance(t);
+        const partialPaid = key === 'gecmis' ? 0 : C.r2(t.tutar - amount);
+        add(key, { kismiOdeme: partialPaid, ym: t.ym, vade: t.vade_tarihi, durum: paid ? 'odendi' : covered ? 'sigorta' : C.installmentStatus(t, now()), banka: e.banka, cat: e.cat, hesap: e.hesap,
+          aciklama: e.cat === 'KREDI' ? it.kredi_adi : it.aciklama, taksitNo: t.no, toplam: it.toplam_taksit, tutar: amount, pid: e.parent ? e.parent.id : 0, iid: it.id });
       });
     });
 
@@ -1413,7 +1415,8 @@
       const g = groups[k]; g.rows.sort((a, b) => a.vade.localeCompare(b.vade));
       const due = g.rows.filter((r) => r.durum !== 'sigorta');
       g.title = k === 'gecmis' ? 'Önceki aylardan kalanlar' : C.fmtYM(k);
-      g.toplam = C.sum(due, (r) => r.tutar); g.odenen = C.sum(due.filter((r) => r.durum === 'odendi'), (r) => r.tutar);
+      g.toplam = C.sum(due, (r) => Number(r.tutar) + (r.kismiOdeme || 0));
+      g.odenen = C.sum(due, (r) => r.durum === 'odendi' ? r.tutar : (r.kismiOdeme || 0));
       g.adet = due.length; g.sigorta = g.rows.filter((r) => r.durum === 'sigorta').length;
       g.closing = closingByYm[k] || [];
       g.closingCount = g.closing.length;
@@ -1430,7 +1433,7 @@
       return `<li class="${r.durum === 'odendi' ? 'dim' : ''}"><span class="dt">${r.vade.slice(8)}.${r.vade.slice(5, 7)}</span><div class="grow"><b>${esc(r.aciklama)}</b><small>Elden borç</small></div>${chip(r.durum)}<span class="amt">${M(r.tutar)}</span>${act}</li>`;
     }
     const label = r.banka && r.banka !== 'Diğer' ? `${r.banka} · ${r.aciklama}` : r.aciklama;
-    if (r.stmt) return `<li class="${r.durum === 'odendi' ? 'dim' : ''}"><span class="dt">${r.vade.slice(8)}.${r.vade.slice(5, 7)}</span><div class="grow"><b>${esc(label)}</b><small>Kart ekstresi · ${r.adet} kalem</small></div>${chip(r.durum)}<span class="amt">${M(r.tutar)}</span>${stmtBtn(r)}</li>`;
+    if (r.stmt) return `<li class="${r.durum === 'odendi' ? 'dim' : ''}"><span class="dt">${r.vade.slice(8)}.${r.vade.slice(5, 7)}</span><div class="grow"><b>${esc(label)}</b><small>Kart ekstresi · ${r.adet} kalem</small></div>${chip(r.durum)}<span class="amt">${r.durum === 'odendi' ? '' : 'Kalan '}${M(r.tutar)}</span>${stmtBtn(r)}</li>`;
     return `<li class="${r.durum === 'odendi' ? 'dim' : ''}"><span class="dt">${r.vade.slice(8)}.${r.vade.slice(5, 7)}</span><div class="grow"><b>${esc(label)}</b><small>${catName[r.cat]} · ${esc(r.hesap)} · ${r.taksitNo}/${r.toplam}</small></div>${chip(r.durum)}<span class="amt ${r.durum === 'sigorta' ? 'muted' : ''}">${M(r.tutar)}</span>${['odendi', 'sigorta'].includes(r.durum) ? '' : payBtn({ cat: r.cat, parentId: r.pid, itemId: r.iid, taksitNo: r.taksitNo })}</li>`;
   }).join('')}</ul>`;
   /** Takvimdeki aylar için nakit durumu (gelir varsa). Tek seferde hesaplanır. */
@@ -1455,7 +1458,7 @@
     const dlg = $('dlg-cal'), g = calMonths(sum).find((x) => x.key === ui.calDlg);
     if (!g) { ui.calDlg = null; if (dlg.open) dlg.close(); return; }
     $('cal-title').textContent = g.title;
-    $('cal-sub').innerHTML = `${g.adet} ödeme · ${M(g.toplam)}${g.odenen > 0.5 ? ` · ${M(g.odenen)} ödendi` : ''}${g.closingCount ? ` · 🏆 ${g.closingCount} borç bitiyor!` : ''}`;
+    $('cal-sub').innerHTML = `${g.adet} ödeme · ${M(g.toplam)}${g.odenen > 0 ? ` · ${M(g.odenen)} ödendi` : ''}${g.closingCount ? ` · 🏆 ${g.closingCount} borç bitiyor!` : ''}`;
     const v = g.key === 'gecmis' ? null : C.monthView(db, new Date(), g.key, S());
     const r = (l, x, cls) => `<div class="cash-row${cls ? ' ' + cls : ''}"><span>${l}</span><b${x < -0.005 ? ' class="bad-t"' : ''}>${x < -0.005 ? '−' : ''}${M(Math.abs(x))}</b></div>`;
     const box = v ? `<div class="cash-body boxed">${db.ek_gelirler.length ? r('Gelir', v.gelir) : ''}${r('Borç ödemeleri', -v.borc)}${v.gider > 0.005 ? r('Sabit giderler', -v.gider) : ''}${v.faiz > 0.005 ? r('Artı para faizi (tahmini)', -v.faiz) : ''}${v.tek > 0.005 ? r('Tek seferlik', -v.tek) : ''}${r('Toplam ödeme', -v.toplamOdeme, 'total')}${db.ek_gelirler.length ? r('Ödemelerden sonra kalan', v.kalan, 'total big') : ''}</div>`
@@ -1478,7 +1481,7 @@
       return `<button type="button" class="mcal mc2 ${g.key === 'gecmis' ? 'warn' : ''}${g.closingCount ? ' has-win' : ''}" data-act="cal-open" data-cal="${g.key}" aria-haspopup="dialog">
         <div class="mc-head"><b>${esc(g.title)}</b><span class="muted">${g.adet} ödeme${g.sigorta ? ` · ${icon('shield')} ${g.sigorta}` : ''}</span></div>
         <div class="mc-row main"><span>${g.key === 'gecmis' ? 'Ödenmemiş' : 'Toplam ödeme'}</span><b>${M(top)}</b></div>
-        <small class="mc-sub">${parts}${g.odenen > 0.5 ? ` · <span class="ok-t">${M(g.odenen)} ödendi</span>` : ''}</small>
+        <small class="mc-sub">${parts}${g.odenen > 0 ? ` · <span class="ok-t">${M(g.odenen)} ödendi</span>` : ''}</small>
         ${kalan}${biten}</button>`;
     }).join('');
     const from = list[0].key === 'gecmis' ? 'Önceki aylar' : C.fmtYM(list[0].key), to = list[list.length - 1].key === 'gecmis' ? 'Önceki aylar' : C.fmtYM(list[list.length - 1].key);
